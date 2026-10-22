@@ -26,6 +26,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { imageFile } from "./lib/images.mjs";
 import { refinePlacement } from "./lib/placement.mjs";
 import { createWorker } from "tesseract.js";
 
@@ -46,10 +47,7 @@ const scene = opt("--scene-file")
       return s;
     })();
 if (!scene.trace) throw new Error("This scene has no reference image");
-const pub = (src) => {
-  if (/^https?:/.test(src)) throw new Error(`Only images under /public can be read (${src})`);
-  return path.join(ROOT, "public", src);
-};
+const pub = (src) => imageFile(ROOT, opt("--image-dir"), src);
 const applyAffine = ([a, b, c, d, e, f], [x, y]) => [a * x + b * y + c, d * x + e * y + f];
 
 // ---------------------------------------------------------------- 1. the tint

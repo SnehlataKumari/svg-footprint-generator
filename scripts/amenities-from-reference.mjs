@@ -22,6 +22,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { imageFile } from "./lib/images.mjs";
 import { refinePlacement } from "./lib/placement.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,10 +42,8 @@ const scene = opt("--scene-file")
       return s;
     })();
 if (!scene.trace) throw new Error("This scene has no reference image");
-const pub = (src) => {
-  if (/^https?:/.test(src)) throw new Error(`Only images under /public can be read (${src})`);
-  return path.join(ROOT, "public", src);
-};
+const imageDir = opt("--image-dir");
+const pub = (src) => imageFile(ROOT, imageDir, src);
 const applyAffine = ([a, b, c, d, e, f], [x, y]) => [a * x + b * y + c, d * x + e * y + f];
 // fine-tune the placement first: tracing compares the two pictures closely
 const placed = await refinePlacement(pub(scene.image), pub(scene.trace.image), scene.trace.transform);
@@ -173,7 +172,7 @@ const counts = {};
 for (const t of types) counts[colourName(t.rep.sym.color)] = (counts[colourName(t.rep.sym.color)] ?? 0) + 1;
 const seen = {};
 const iconDir = path.join(ROOT, "public", "scenes", "icons");
-await mkdir(iconDir, { recursive: true });
+if (!imageDir) await mkdir(iconDir, { recursive: true });
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const categories = [];
 const shapes = [];
@@ -197,8 +196,11 @@ for (const t of types) {
     rgba[i * 4 + 3] = Math.round(255 * Math.max(0, Math.min(1, (1 - d) * b.r * scale * 0.5))); // soft round edge
   }
   const file = `${slug(scene.id)}-${id}.png`;
-  await sharp(rgba, { raw: { width: px, height: py, channels: 4 } }).png().toFile(path.join(iconDir, file));
-  categories.push({ id, label, color: hex(t.rep.sym.color), icon: `/scenes/icons/${file}` });
+  const png = await sharp(rgba, { raw: { width: px, height: py, channels: 4 } }).png().toBuffer();
+  // the hosted editor (--image-dir) has no public/ to write to: the icon travels inside the result
+  if (!imageDir) await writeFile(path.join(iconDir, file), png);
+  const icon = imageDir ? `data:image/png;base64,${png.toString("base64")}` : `/scenes/icons/${file}`;
+  categories.push({ id, label, color: hex(t.rep.sym.color), icon });
   t.badges
     .sort((p, q) => p.y - q.y || p.x - q.x)
     .forEach((bd, n) => {

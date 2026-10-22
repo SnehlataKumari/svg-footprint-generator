@@ -426,13 +426,7 @@ export function GeneratePanel(p: GenerateProps) {
         {option("amenities", "Amenity icons", "small round badges marking amenities (park, cycling, dining…). Each becomes a pin at the same spot, grouped by type; give each type your own icon under Categories.")}
         {option("lines", "Coloured lines", "your picture with routes drawn on it in bright colours, solid or dashed (metro / bus lines, roads). Each becomes a line in the same colour and dash.")}
       </div>
-      {editorStorage() === "browser" && (
-        <p className="rounded-md bg-amber-50 p-2 text-amber-800">
-          Generate needs the desktop version of this tool (it reads the images with heavy image processing). Here, use <b>Auto-detect</b> or{" "}
-          <b>Wand</b> on the reference instead, or draw with <b>Polygon</b>.
-        </p>
-      )}
-      <button type="button" className={`${PRIMARY_BUTTON} w-full`} onClick={p.onGenerate} disabled={!!p.busy || !p.modes.length || editorStorage() === "browser"}>
+      <button type="button" className={`${PRIMARY_BUTTON} w-full`} onClick={p.onGenerate} disabled={!!p.busy || !p.modes.length}>
         {p.busy ? "Generating…" : p.modes.length > 1 ? `Generate ${p.modes.length} kinds` : "Generate"}
       </button>
       {p.busy && (

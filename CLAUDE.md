@@ -46,6 +46,10 @@ There is no test suite. Verify with lint + type-check, the generators'
   generator script), `projects` (new / open; others wait in `data/projects/`),
   `import-facilities`, `plot-details`. All writes are **dev only**
   (`NODE_ENV === "development"` check) — keep it that way for new write routes.
+  Exception: `generate` (+ `generate/upload`, Vercel Blob) also runs hosted —
+  it writes nothing, and only reads public/ in dev; hosted, the browser sends
+  the images. The generators are spawned, so `next.config.ts`
+  `outputFileTracingIncludes` ships them and their packages with the route.
 - Hosted editor (production, or `/editor?browser` in dev): `components/editor/browser-editor.tsx`
   + `lib/browser-store.ts` — projects and images in IndexedDB, images referenced
   as `local:<id>`. **Load every image through `imageUrl(src)`**; branch on

@@ -36,6 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
+import { imageFile } from "./lib/images.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECT_FILE = path.join(ROOT, "data/project.json");
@@ -182,9 +183,8 @@ function refinePlacement(scene, ref, T) {
 const project = sceneFile ? null : JSON.parse(await readFile(PROJECT_FILE, "utf8"));
 const scene = sceneFile ? JSON.parse(await readFile(sceneFile, "utf8")) : project.scenes.find((s) => s.id === (sceneId ?? project.startScene));
 if (!scene) throw new Error(`No scene "${sceneId}". Scenes: ${project.scenes.map((s) => s.id).join(", ")}`);
-if (/^https?:/.test(scene.image) || /^https?:/.test(scene.trace?.image ?? "")) throw new Error("Only images under /public can be read");
 if (!scene.trace) throw new Error(`Scene "${scene.id}" has no reference image (Scene settings → Reference image)`);
-const pub = (src) => path.join(ROOT, "public", src);
+const pub = (src) => imageFile(ROOT, opt("--image-dir"), src);
 log(`Scene ${scene.id}: ${scene.image}  ·  reference ${scene.trace.image}`);
 
 const G = await loadGray(pub(scene.trace.image));
