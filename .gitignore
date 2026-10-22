@@ -31,7 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (real values — never commit these; only the template below is tracked)
-# .env*
+.env*
 !.example.env
 
 # vercel

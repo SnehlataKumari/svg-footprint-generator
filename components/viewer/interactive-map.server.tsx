@@ -1,4 +1,4 @@
-import { getProject } from "@/lib/project";
+import { getViewerProject } from "@/lib/project";
 import { InteractiveMap, type InteractiveMapProps } from "./interactive-map";
 
 /**
@@ -13,5 +13,5 @@ import { InteractiveMap, type InteractiveMapProps } from "./interactive-map";
  * Can't be imported into a "use client" file — use InteractiveMapClient there.
  */
 export async function InteractiveMapServer(props: Omit<InteractiveMapProps, "project">) {
-  return <InteractiveMap project={await getProject()} {...props} />;
+  return <InteractiveMap project={await getViewerProject()} {...props} />;
 }

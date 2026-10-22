@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { InteractiveMap } from "@/components/viewer/interactive-map";
-import { getProject } from "@/lib/project";
+import { getProject, getViewerProject } from "@/lib/project";
 
-/** Every scene is pre-rendered at build time. */
+/** Every scene is pre-rendered at build time; plot details refresh every minute. */
+export const revalidate = 60;
+
 export async function generateStaticParams() {
   const project = await getProject();
   return project.scenes.map((s) => ({ id: s.id }));
@@ -21,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ScenePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sceneId = decodeURIComponent(id);
-  const project = await getProject();
+  const project = await getViewerProject();
   const scene = project.scenes.find((s) => s.id === sceneId);
   if (!scene) notFound();
   return (

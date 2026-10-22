@@ -167,4 +167,8 @@ export interface Project {
   scenes: Scene[];
   /** Look of every plot in the project. */
   style?: PlotStyle;
+  /** Plot details by hotspot ID (= shape id) — the local copy of what is
+   *  published to Contentful (lib/plot-details.ts). The viewer shows
+   *  Contentful's when it is set up, these otherwise. */
+  details?: Record<string, import("./plot-details").UnitDetails>;
 }
