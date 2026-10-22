@@ -54,8 +54,14 @@ visitor's own browser** (IndexedDB) instead of `data/` and `public/`:
 - **Preview ↗** opens `/preview`, the saved project as visitors would see it.
 - Drawing, Wand, Auto-detect, reference images, numbering, plot details (stored
   in the project) and all exports (SVG, paths, JSON) work.
-- **Generate from reference** and **Import from GIS files** need the desktop
-  version (`npm run dev`): they run heavy image processing on the server.
+- **Generate from reference** works too: the browser sends the scene's two
+  images with each run. Vercel takes at most 4.5 MB per request, so when the
+  two images are bigger together they are uploaded to **Vercel Blob** first
+  (and deleted once read) — connect a **private** Blob store to the Vercel
+  project (Storage → Blob; it sets `BLOB_READ_WRITE_TOKEN`). Plots on a big
+  map take 1–3 minutes: Vercel's function time limit (`maxDuration` 300 s)
+  and memory (2 GB default) apply; if a run is cut off, use `npm run dev`.
+- **Import from GIS files** needs the desktop version (`npm run dev`).
 
 The public viewer (`/`, `/scene/<id>`) still shows the deployed `data/project.json`.
 To publish a map there, download it from the hosted editor, put it in
@@ -153,7 +159,8 @@ Once the reference is placed (**Place reference… → Auto-align**), click
 
 The results show in orange; click a wrong one to skip it, then **Add**, then
 **Save**. The server runs `scripts/areas-from-reference.mjs` /
-`scripts/plots-from-reference.mjs` on the scene (`app/api/generate`), dev only.
+`scripts/plots-from-reference.mjs` on the scene (`app/api/generate`; the
+hosted editor sends the images along, see above).
 From a terminal: `npm run areas:from-reference -- <sceneId> --preview /tmp/check.jpg`
 (prints what it finds, changes nothing).
 
@@ -471,6 +478,8 @@ app/editor/page.tsx        editor route (404 in production builds)
 app/api/project            GET = the project JSON (client components);
                            PUT = editor save (dev only)
 app/api/upload             editor image upload (dev only)
+app/api/generate           Generate from reference (dev: images from public/;
+                           hosted: images sent along, big ones via ./upload → Vercel Blob)
 
 lib/types.ts               the data model — start reading here
 lib/use-pan-zoom.ts        pan / zoom / pinch engine (viewer + editor share it)
