@@ -1,18 +1,18 @@
-import { canPublish, canRead, fetchUnits, publishUnits } from "@/lib/contentful";
+import { canPublish, canRead, publishUnits } from "@/lib/contentful";
 import { parseRow, type UnitDetails } from "@/lib/plot-details";
-import { getProject } from "@/lib/project";
+import { getDetails, getProject, saveLocalDetails } from "@/lib/project";
 import { readSheet } from "@/lib/sheet";
 
 /**
  * Plot details (lib/plot-details.ts).
- * GET                       → details by hotspot ID: Contentful's when set up, else the project's copy
- * POST multipart {file}     → the spreadsheet parsed and checked (rows + errors), nothing saved
- * PUT  { units, publish }   → publish the units to Contentful (dev only); the editor keeps its own copy
+ * GET                        → details by hotspot ID: the local file (data/plot-details/<project>.json),
+ *                              Contentful's on top when set up
+ * POST multipart {file}      → the spreadsheet parsed and checked (rows + errors), nothing saved
+ * PUT { units, publish? }    → saved to the local file; with publish, also to Contentful (dev only)
  */
 export async function GET() {
-  const fromContentful = await fetchUnits();
-  const local = (await getProject()).details ?? {};
-  return Response.json({ source: Object.keys(fromContentful).length ? "contentful" : "project", details: { ...local, ...fromContentful } });
+  const { details, source } = await getDetails(await getProject());
+  return Response.json({ source, details });
 }
 
 export async function POST(request: Request) {
@@ -28,9 +28,12 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  if (process.env.NODE_ENV !== "development") return Response.json({ error: "Publishing is only available in `npm run dev`" }, { status: 403 });
-  if (!canPublish()) return Response.json({ error: "Contentful isn't set up: add CONTENTFUL_SPACE_ID and CONTENTFUL_MANAGEMENT_TOKEN to .env.local (see .example.env), then restart `npm run dev`" }, { status: 400 });
-  const { units, publish = true } = (await request.json()) as { units: UnitDetails[]; publish?: boolean };
-  const results = await publishUnits(units, publish);
-  return Response.json({ results, ok: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
+  if (process.env.NODE_ENV !== "development") return Response.json({ error: "Saving is only available in `npm run dev`" }, { status: 403 });
+  const { units, publish = false } = (await request.json()) as { units: UnitDetails[]; publish?: boolean };
+  if (!Array.isArray(units)) return Response.json({ error: "No units" }, { status: 400 });
+  const local = await saveLocalDetails(await getProject(), units);
+  if (!publish) return Response.json({ local });
+  if (!canPublish()) return Response.json({ local, error: "Saved locally. Contentful isn't set up: add CONTENTFUL_SPACE_ID and CONTENTFUL_MANAGEMENT_TOKEN to .env.local (see .example.env), then restart `npm run dev`" }, { status: 400 });
+  const results = await publishUnits(units, true);
+  return Response.json({ local, results, ok: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
 }

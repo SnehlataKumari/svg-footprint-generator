@@ -32,6 +32,16 @@ Everything the site shows lives in one file: `data/project.json`.
 8. Commit `data/project.json` and `public/scenes/`. Deploy with
    `npm run build && npm run start` (or any Next.js host).
 
+## Drawing on a map image (no reference)
+
+Any image works on its own. With no reference image, the bar under the toolbar
+reads **Draw on this map**: **✎ Draw area** (P — click the corners, click the
+first point or press Enter to close), **Wand** (W — one click inside an area
+with clear edges), **Auto-detect** (D), **Line**. Select an area: the right
+panel shows its **SVG path** (in the image's pixels) with *Copy path* /
+*Copy points (%)*. **Export**: *⬇ SVG file* (one `<path id>` per area, sized
+like the image), *⬇ Paths (JSON)* (`[{ id, label, kind, d }]`), *⧉ Copy paths*.
+
 ## 0 · Reference image (optional)
 
 A **reference image** is any picture of the same area with the plots marked —
@@ -133,6 +143,36 @@ pixel, the wash colour; groups the washed ground by colour (hue counts more
 than brightness, so roofs and roads under one wash stay together); drops what
 isn't a wash over the picture (logos, buttons, the legend); outlines each area
 and reads the light text inside it (OCR).
+
+### Plot details from Excel → Contentful
+
+Plot **outlines** stay in this project; plot **details** (typology, facade,
+status, area…) live in Contentful as `unit` entries. The only link is the
+**hotspot ID** = the plot's ID here (`unit.hotspotId`).
+
+1. Scene settings → **Plot details (Excel → Contentful)…** → **⬇ Template**: a
+   CSV (opens in Excel) with every plot's hotspot ID filled in. Columns:
+   `hotspotId, zone, plotLabel, mdTypology, facadeOption, status, mdPlotArea,
+   gfa, parking, confirmed` (other columns are kept as extra details, not sent).
+2. Fill it in, upload it (.xlsx or .csv). Each row is checked (allowed values,
+   numbers) and matched to a plot by hotspot ID — or by plot label, with the
+   option to rename those plots to their hotspot ID. *Colour plots by status*
+   adds Available / Booked / Blocked / Sold / Unassigned categories.
+3. **Save to local JSON**: the details go to `data/plot-details/<project>.json`
+   (keyed by hotspot ID, Contentful's field names; **Download JSON** gives you
+   the file) and the map uses them. Renamed plots / status categories change the
+   project — Save it too. With Contentful set up, **Save & publish to
+   Contentful** also creates/updates + publishes one `unit` per row (the local
+   JSON stays as a backup).
+
+Contentful is optional. To add it, put in `.env.local` (see `.example.env`;
+never committed): `CONTENTFUL_SPACE_ID`, `CONTENTFUL_ENVIRONMENT`,
+`CONTENTFUL_MANAGEMENT_TOKEN` (publishing, dev machine only),
+`CONTENTFUL_DELIVERY_TOKEN` (the viewer reading details), `CONTENTFUL_LOCALE`,
+and restart `npm run dev`. The viewer merges the details onto the plots by
+hotspot ID (details card, status colour): the local JSON, with Contentful's
+on top when set up (refreshed every minute). `GET /api/plot-details` returns
+them as JSON for other front ends.
 
 ### Facilities from a spreadsheet + GIS map
 

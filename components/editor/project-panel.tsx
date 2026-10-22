@@ -6,6 +6,7 @@ import type { Category, Project, Scene } from "@/lib/types";
 import { BUTTON, INPUT, LABEL } from "../ui";
 import { Field, slugify, uploadImage } from "./fields";
 import { IconPicker } from "./icon-picker";
+import { PlotDetails } from "./plot-details";
 import { PlotLook } from "./plot-look";
 import { ProjectSwitcher } from "./project-switcher";
 
@@ -25,6 +26,7 @@ export function ProjectPanel({ project, sceneId, onSelectScene, onChange, onStat
   const scene = project.scenes.find((s) => s.id === sceneId);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const setScene = (patch: Partial<Scene>) =>
     onChange({ ...project, scenes: project.scenes.map((s) => (s.id === sceneId ? { ...s, ...patch } : s)) });
@@ -211,6 +213,10 @@ export function ProjectPanel({ project, sceneId, onSelectScene, onChange, onStat
               </>
             )}
           </div>
+          <button type="button" className={`${BUTTON} w-full`} onClick={() => setDetailsOpen(true)} title="Excel of plot details by hotspot ID → this project + Contentful">
+            Plot details (Excel → Contentful)…
+          </button>
+          {detailsOpen && <PlotDetails project={project} scene={scene} onChange={onChange} onStatus={onStatus} onClose={() => setDetailsOpen(false)} />}
           <div className="flex gap-2">
             <label className={`${BUTTON} flex-1`}>
               Replace image

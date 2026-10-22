@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { shapeColor } from "@/lib/scene-tree";
+import { shapePath } from "@/lib/svg-export";
 import type { PlotStyle, Project, Scene, Shape } from "@/lib/types";
 import { BUTTON, INPUT, LABEL } from "../ui";
 import { Field } from "./fields";
@@ -77,7 +78,7 @@ export function ShapePanel({ project, scene, selected, onSelect, onChange, onSty
               </button>
             </li>
           ))}
-          {scene.shapes.length === 0 && <li className="p-2 text-sm text-neutral-500">No shapes yet — try Auto-detect (D) in the toolbar.</li>}
+          {scene.shapes.length === 0 && <li className="p-2 text-sm text-neutral-500">No areas yet — draw one with ✎ Draw area (P) or the Wand (W), or try Auto-detect (D).</li>}
         </ul>
         <p className="text-[11px] text-neutral-500">Shift/Ctrl+click to select several.</p>
       </div>
@@ -161,6 +162,8 @@ export function ShapePanel({ project, scene, selected, onSelect, onChange, onSty
             </select>
           </label>
 
+          {single && single.kind !== "pin" && <SvgPath scene={scene} shape={single} />}
+
           {single && (
             <>
               <Field label="Description" multiline value={single.description ?? ""} onCommit={(v) => onChange({ description: v || undefined })} />
@@ -216,6 +219,41 @@ function PinIconField({ project, selected, onChange }: { project: Project; selec
         </button>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/** The selected area's outline, ready to paste: SVG path data in the image's pixels, and its points in percent. */
+function SvgPath({ scene, shape }: { scene: Scene; shape: Shape }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const d = shapePath(scene, shape);
+  const points = JSON.stringify(shape.points);
+  const copy = async (what: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      setCopied("select the text and copy it");
+    }
+  };
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className={LABEL}>SVG path</span>
+        <span className="flex gap-2 text-xs">
+          <button type="button" className="cursor-pointer text-sky-700 underline" onClick={() => copy("path", d)}>
+            {copied === "path" ? "Copied ✓" : "Copy path"}
+          </button>
+          <button type="button" className="cursor-pointer text-sky-700 underline" onClick={() => copy("points", points)}>
+            {copied === "points" ? "Copied ✓" : "Copy points (%)"}
+          </button>
+        </span>
+      </div>
+      <textarea readOnly value={d} onFocus={(e) => e.currentTarget.select()} className="h-16 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-1.5 font-mono text-[11px] text-neutral-700" />
+      <p className="text-[11px] text-neutral-500">
+        In the pixels of the image ({scene.width}×{scene.height}) · {shape.points.length} points{copied && !["path", "points"].includes(copied) ? ` · ${copied}` : ""}
+      </p>
     </div>
   );
 }

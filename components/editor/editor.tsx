@@ -487,6 +487,25 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     say(`Copied ${what} to the clipboard`);
   };
 
+  // ---- Exports: every area as an SVG path (in the image's pixels) ----
+  const copyPaths = () => {
+    if (pendingWarning() || !scene) return;
+    if (!scene.shapes.length) return say("No areas yet — draw one first (Polygon, P)", true);
+    copy(scenePaths(scene), `${scene.shapes.length} SVG paths`);
+  };
+  const downloadSvg = () => {
+    if (pendingWarning() || !scene) return;
+    if (!scene.shapes.length) return say("No areas yet — draw one first (Polygon, P)", true);
+    const url = URL.createObjectURL(new Blob([sceneSvg(scene)], { type: "image/svg+xml" }));
+    Object.assign(document.createElement("a"), { href: url, download: `${scene.id}-areas.svg` }).click();
+    URL.revokeObjectURL(url);
+  };
+  const downloadPathsJson = () => {
+    if (pendingWarning() || !scene) return;
+    if (!scene.shapes.length) return say("No areas yet — draw one first (Polygon, P)", true);
+    download(`${scene.id}-paths.json`, scenePaths(scene));
+  };
+
   const importJson = async (file: File) => {
     try {
       const data = JSON.parse(await file.text()) as Project;
@@ -791,16 +810,8 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
                 copy(scene, `scene "${scene.title}" (${scene.shapes.length} shapes)`);
               }}
               shapeCount={scene?.shapes.length ?? 0}
-              onCopyPaths={() => {
-                if (pendingWarning()) return;
-                copy(scenePaths(scene), `${scene.shapes.length} plot paths`);
-              }}
-              onDownloadSvg={() => {
-                if (pendingWarning()) return;
-                const url = URL.createObjectURL(new Blob([sceneSvg(scene)], { type: "image/svg+xml" }));
-                Object.assign(document.createElement("a"), { href: url, download: `${scene.id}-plots.svg` }).click();
-                URL.revokeObjectURL(url);
-              }}
+              onCopyPaths={copyPaths}
+              onDownloadSvg={downloadSvg}
               onCopySelected={() => copy(selectedShapes, `${selectedShapes.length} shapes`)}
               onImport={importJson}
               onEditJson={() => setJsonScope(selectedIds.length ? "selection" : "scene")}
@@ -886,10 +897,38 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
                 </button>
               </>
             ) : (
-              <span className="text-neutral-500">
-                Have a reference image with the plots marked (CAD, PDF export, a render with lines…)? Add it under <b>Scene settings → Reference image</b> — place it on top
-                of this image, then trace or detect on it.
-              </span>
+              <>
+                <span className="font-semibold">Draw on this map</span>
+                <div className="flex overflow-hidden rounded border border-black/10">
+                  {(
+                    [
+                      ["polygon", "✎ Draw area", "Click each corner, then click the first point (or Enter) to close"],
+                      ["wand", "Wand", "Click inside an area with clear edges to outline it"],
+                      ["detect", "Auto-detect", "Click one area to find every similar one"],
+                      ["line", "Line", "Draw a road / path"],
+                    ] as const
+                  ).map(([t, label, title]) => (
+                    <button key={t} type="button" title={title} onClick={() => setTool(t)} className={`cursor-pointer px-2 py-1 ${tool === t ? "bg-neutral-900 text-white" : "bg-white hover:bg-neutral-100"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="font-semibold">Export</span>
+                <div className="flex overflow-hidden rounded border border-black/10">
+                  <button type="button" className="cursor-pointer bg-white px-2 py-1 hover:bg-neutral-100" onClick={downloadSvg} title="One <path id=…> per area, sized like the image">
+                    ⬇ SVG file
+                  </button>
+                  <button type="button" className="cursor-pointer border-l border-black/10 bg-white px-2 py-1 hover:bg-neutral-100" onClick={downloadPathsJson} title="[{ id, label, kind, d }] — d in the image's pixels">
+                    ⬇ Paths (JSON)
+                  </button>
+                  <button type="button" className="cursor-pointer border-l border-black/10 bg-white px-2 py-1 hover:bg-neutral-100" onClick={copyPaths}>
+                    ⧉ Copy paths
+                  </button>
+                </div>
+                <span className="text-neutral-500">
+                  {scene.shapes.length} {scene.shapes.length === 1 ? "area" : "areas"} · have a plan with the areas marked? Add it as a <b>reference image</b> (Scene settings) to trace or generate from it.
+                </span>
+              </>
             )}
           </div>
         )}
@@ -921,6 +960,13 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
               />
             )}
             <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {!plotting && scene.shapes.length === 0 && !detection && !align && (
+                <div className="pointer-events-none absolute top-3 left-1/2 z-20 max-w-md -translate-x-1/2 rounded-lg bg-neutral-900/90 px-4 py-3 text-sm text-white shadow-lg">
+                  <b>Draw your first area:</b> pick <b>✎ Draw area</b> (or press <kbd className="rounded bg-white/20 px-1">P</kbd>) and click its corners —
+                  click the first point to close. Areas with clear edges: <b>Wand</b> (<kbd className="rounded bg-white/20 px-1">W</kbd>), one click inside.
+                  Each area&apos;s SVG path is in the right panel; <b>⬇ SVG file</b> exports them all.
+                </div>
+              )}
               {pendingCount > 0 && !detectBusy && (
                 <div className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white shadow-lg">
                   {pendingCount} {pendingNoun} found — not in your project until you add them

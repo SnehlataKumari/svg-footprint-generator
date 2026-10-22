@@ -62,6 +62,8 @@ export const STATUS_COLORS: Record<string, string> = {
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+/** GIS / spreadsheet bookkeeping columns: not plot details, never shown. */
+const IGNORED = new Set(["sno", "no", "objectid", "fid", "oid", "shape", "shapelength", "shapearea", "shapeleng", "globalid"]);
 const EMPTY = /^(|<null>|null|n\/a|na|-|—)$/i;
 
 /** Which field each spreadsheet column is (null = an extra column). */
@@ -70,15 +72,23 @@ export function mapHeaders(headers: string[]): (FieldDef | null)[] {
 }
 
 /** One spreadsheet row → details + what's wrong with it. */
-export function parseRow(headers: string[], cells: string[]): { details: UnitDetails; errors: string[] } {
+/**
+ * One spreadsheet row → details. `errors` make the row unusable (no ID, a
+ * value that isn't allowed); `warnings` are filled-in defaults or fields
+ * Contentful will want — the row is still saved.
+ * Forgiving with GIS exports: no hotspotId column → the plot ID is the hotspot
+ * ID; no zone → the cluster / the plot ID's prefix; no status → Unassigned.
+ */
+export function parseRow(headers: string[], cells: string[]): { details: UnitDetails; errors: string[]; warnings: string[] } {
   const fields = mapHeaders(headers);
-  const details: UnitDetails = { hotspotId: "" };
+  const details = {} as UnitDetails;
+  const warnings: string[] = [];
   const errors: string[] = [];
   const extra: Record<string, string> = {};
   fields.forEach((f, i) => {
     const raw = (cells[i] ?? "").trim();
     if (!f) {
-      if (raw && !EMPTY.test(raw) && headers[i]?.trim()) extra[headers[i].trim()] = raw;
+      if (raw && !EMPTY.test(raw) && headers[i]?.trim() && !IGNORED.has(norm(headers[i]))) extra[headers[i].trim()] = raw.replace(/^(-?\d+)\.0+$/, "$1");
       return;
     }
     if (EMPTY.test(raw)) return;
@@ -98,8 +108,20 @@ export function parseRow(headers: string[], cells: string[]): { details: UnitDet
     }
   });
   if (Object.keys(extra).length) details.extra = extra;
-  for (const f of UNIT_FIELDS) if (f.required && details[f.key] === undefined) errors.push(`${f.label} is missing`);
-  return { details, errors };
+  // defaults for what a GIS export doesn't carry
+  if (!details.hotspotId && details.plotLabel) details.hotspotId = details.plotLabel;
+  if (!details.plotLabel && details.hotspotId) details.plotLabel = details.hotspotId;
+  if (!details.zone && details.plotLabel) {
+    const prefix = details.plotLabel.match(/^[A-Za-z]+\d+/)?.[0];
+    if (prefix) details.zone = prefix;
+  }
+  if (!details.status && !errors.some((e) => e.startsWith("Status:"))) {
+    details.status = "Unassigned";
+    warnings.push("Status not given — set to Unassigned");
+  }
+  if (!details.hotspotId) errors.push("No hotspot ID or plot ID");
+  for (const f of UNIT_FIELDS) if (f.required && details[f.key] === undefined && !errors.some((e) => e.startsWith(`${f.label}:`))) warnings.push(`${f.label} is missing`);
+  return { details, errors, warnings };
 }
 
 /** The details card rows for a plot. */
