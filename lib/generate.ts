@@ -1,3 +1,4 @@
+import { editorStorage } from "./browser-store";
 import type { Affine, Category, Scene, Shape } from "./types";
 
 /**
@@ -19,6 +20,7 @@ export type GenerateResult =
   | { error: string; log?: string };
 
 export async function generateFromReference(mode: GenerateMode, scene: Scene): Promise<GenerateResult> {
+  if (editorStorage() === "browser") return { error: "Generate needs the desktop version (npm run dev) — use Auto-detect or Wand here" };
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

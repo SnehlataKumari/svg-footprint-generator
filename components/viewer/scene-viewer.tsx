@@ -2,6 +2,7 @@
 
 import gsap from "gsap";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { imageUrl } from "@/lib/browser-store";
 import { boundingBox, centroid } from "@/lib/geometry";
 import { ancestry } from "@/lib/scene-tree";
 import { categoryColor, resolveStyle } from "@/lib/style";
@@ -153,7 +154,7 @@ export function SceneViewer({ project, sceneId, onNavigate, onPrefetch, globalKe
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               ref={imgRef}
-              src={scene.image}
+              src={imageUrl(scene.image)}
               alt=""
               draggable={false}
               onLoad={() => setLoaded(true)}

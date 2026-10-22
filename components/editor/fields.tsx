@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { editorStorage, imageUrl, storeImage } from "@/lib/browser-store";
 import { INPUT, LABEL } from "../ui";
 
 /**
@@ -43,21 +44,29 @@ export function Field(props: {
   );
 }
 
-/** Uploads an image into public/scenes/ (dev API) and measures it. */
+/** Uploads an image into public/scenes/ (dev API) — or, in the hosted
+ *  editor, stores it in this browser — and measures it. */
 export async function uploadImage(file: File): Promise<{ src: string; width: number; height: number }> {
+  if (editorStorage() === "browser") {
+    if (!file.type.startsWith("image/")) throw new Error("Unsupported image type");
+    const src = await storeImage(file, file.name);
+    return { src, ...(await measure(imageUrl(src))) };
+  }
   const body = new FormData();
   body.append("file", file);
   const res = await fetch("/api/upload", { method: "POST", body });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Upload failed");
-  const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+  return { src: data.src, ...(await measure(`${data.src}?v=${Date.now()}`)) };
+}
+
+const measure = (url: string) =>
+  new Promise<{ width: number; height: number }>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => reject(new Error("Uploaded file isn't a readable image"));
-    img.src = `${data.src}?v=${Date.now()}`;
+    img.src = url;
   });
-  return { src: data.src, width, height };
-}
 
 export const slugify = (s: string) =>
   s.toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "scene";

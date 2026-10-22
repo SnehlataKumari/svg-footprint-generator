@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { imageUrl } from "@/lib/browser-store";
 import type { Point, TraceImage } from "@/lib/types";
 import { traceMapper } from "@/lib/warp";
 import { usePanZoom } from "@/lib/use-pan-zoom";
@@ -131,7 +132,7 @@ export function ReferencePane(p: Props) {
       >
         <div className="absolute top-0 left-0 origin-top-left" style={{ width: fit.width, height: fit.height, transform }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={trace.image} alt="" draggable={false} className="absolute inset-0 h-full w-full" />
+          <img src={imageUrl(trace.image)} alt="" draggable={false} className="absolute inset-0 h-full w-full" />
 
           {/* Matching points: the reference side (drag to fine-tune) */}
           {aligning &&

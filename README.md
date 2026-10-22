@@ -42,6 +42,26 @@ panel shows its **SVG path** (in the image's pixels) with *Copy path* /
 *Copy points (%)*. **Export**: *⬇ SVG file* (one `<path id>` per area, sized
 like the image), *⬇ Paths (JSON)* (`[{ id, label, kind, d }]`), *⧉ Copy paths*.
 
+## The hosted editor (Vercel / any deployment)
+
+A deployed site can't write files, so there `/editor` keeps everything **in the
+visitor's own browser** (IndexedDB) instead of `data/` and `public/`:
+
+- **Save** (Ctrl+S) stores the project and its uploaded images in this browser —
+  per device and browser, and lost if site data is cleared. Use **JSON ▾ →
+  Download backup** (images included) and **Open a backup…** to move or restore it.
+- **Projects ▾** lists the projects saved in this browser (new / open / delete).
+- **Preview ↗** opens `/preview`, the saved project as visitors would see it.
+- Drawing, Wand, Auto-detect, reference images, numbering, plot details (stored
+  in the project) and all exports (SVG, paths, JSON) work.
+- **Generate from reference** and **Import from GIS files** need the desktop
+  version (`npm run dev`): they run heavy image processing on the server.
+
+The public viewer (`/`, `/scene/<id>`) still shows the deployed `data/project.json`.
+To publish a map there, download it from the hosted editor, put it in
+`data/project.json` (and its images in `public/scenes/`), commit and deploy.
+In `npm run dev`, open `/editor?browser` to try the hosted mode locally.
+
 ## 0 · Reference image (optional)
 
 A **reference image** is any picture of the same area with the plots marked —

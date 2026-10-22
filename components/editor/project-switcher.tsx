@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { deleteProject, editorStorage, listProjects, newProject, openProject } from "@/lib/browser-store";
 import { BUTTON, INPUT, LABEL, PRIMARY_BUTTON } from "../ui";
 import { ImportFacilities } from "./import-facilities";
 
@@ -31,31 +32,46 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const inBrowser = editorStorage() === "browser";
 
   useEffect(() => {
     if (!open) return;
     let live = true;
-    fetch("/api/projects")
-      .then((r) => r.json())
-      .then((d: { projects: Entry[] }) => live && setProjects(d.projects))
+    (inBrowser ? listProjects() : fetch("/api/projects").then((r) => r.json()).then((d: { projects: Entry[] }) => d.projects))
+      .then((list) => live && setProjects(list))
       .catch(() => live && setProjects([]));
     return () => {
       live = false;
     };
-  }, [open]);
+  }, [open, inBrowser, refresh]);
 
   const switchTo = async (body: { action: "new"; title: string } | { action: "open"; name: string }) => {
     setBusy(true);
     try {
       if (dirty && !(await onSave())) return;
+      if (inBrowser) {
+        if (body.action === "new") await newProject(body.title);
+        else await openProject(body.name);
+        onLeave();
+        return window.location.reload();
+      }
       const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) return onStatus(data.error ?? `Failed (${res.status})`, true);
       onLeave();
       window.location.reload(); // a fresh editor for the other project
+    } catch (e) {
+      onStatus((e as Error).message, true);
     } finally {
       setBusy(false);
     }
+  };
+
+  const remove = async (p: Entry) => {
+    if (!window.confirm(`Delete “${p.title}” from this browser? Download a backup first if you may need it.`)) return;
+    await deleteProject(p.name);
+    setRefresh((n) => n + 1);
   };
 
   return (
@@ -80,10 +96,11 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
               + Create and open
             </button>
             <p className="text-xs text-neutral-500">
-              “{title}” is {dirty ? "saved, then " : ""}kept under <code>data/projects/</code> — open it again from the list below.
+              “{title}” is {dirty ? "saved, then " : ""}kept {inBrowser ? "in this browser" : <>under <code>data/projects/</code></>} — open it again from the list below.
             </p>
           </form>
 
+          {!inBrowser && (
           <div className="space-y-1">
             <span className={LABEL}>From GIS files</span>
             <button type="button" className={`${BUTTON} w-full`} disabled={busy} onClick={() => setImporting(true)}>
@@ -91,6 +108,7 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
             </button>
             <p className="text-xs text-neutral-500">Facilities spreadsheet + map PDF + masterplan + phase images → a ready project.</p>
           </div>
+          )}
 
           <div className="space-y-1">
             <span className={LABEL}>Other projects</span>
@@ -108,6 +126,11 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
                     <button type="button" className={`${BUTTON} h-7 text-xs`} disabled={busy} onClick={() => switchTo({ action: "open", name: p.name })}>
                       Open
                     </button>
+                    {inBrowser && (
+                      <button type="button" className={`${BUTTON} h-7 text-xs`} disabled={busy} onClick={() => remove(p)} aria-label={`Delete ${p.title}`}>
+                        ✕
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

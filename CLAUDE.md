@@ -3,7 +3,7 @@
 # Interactive Map — project guide
 
 A Next.js 16 app for "click on the image to explore" maps (masterplans, phase
-plans, villas). **Editor** (`/editor`, dev only) to trace and fill in areas;
+plans, villas). **Editor** (`/editor`; saves to files in dev, to the browser when deployed) to trace and fill in areas;
 **viewer** (`/`, `/scene/[id]`, `<InteractiveMap>`) for visitors. Everything the
 site shows is one file: `data/project.json`. Full user docs: `README.md`.
 
@@ -46,6 +46,11 @@ There is no test suite. Verify with lint + type-check, the generators'
   generator script), `projects` (new / open; others wait in `data/projects/`),
   `import-facilities`, `plot-details`. All writes are **dev only**
   (`NODE_ENV === "development"` check) — keep it that way for new write routes.
+- Hosted editor (production, or `/editor?browser` in dev): `components/editor/browser-editor.tsx`
+  + `lib/browser-store.ts` — projects and images in IndexedDB, images referenced
+  as `local:<id>`. **Load every image through `imageUrl(src)`**; branch on
+  `editorStorage()` for anything that would call a write API. `/preview` = the
+  viewer over the browser-saved project.
 - `components/editor/` — `editor.tsx` (state, history, toolbar), `canvas.tsx`
   (drawing, handles, detection preview), side panels, dialogs.
 - `components/viewer/` — `scene-viewer`, `shape-layer`, `interactive-map(.server|.client)`.

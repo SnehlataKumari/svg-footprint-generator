@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyAffine, composeAffine, rotationDelta, scaleDelta, svgMatrix } from "@/lib/affine";
+import { imageUrl } from "@/lib/browser-store";
 import { boundingBox, centroid, pointInPolygon, round2, toSvgPoints } from "@/lib/geometry";
 import { applyBox, type ImportedSvg, type PlacementBox } from "@/lib/svg-import";
 import { type DetectOptions, detectByComparison, traceRegion } from "@/lib/trace";
@@ -641,7 +642,7 @@ export function EditorCanvas(props: Props) {
         <div className="absolute top-0 left-0 origin-top-left" style={{ width: fit.width, height: fit.height, transform }}>
           {(imageView !== "plotting" || !plotting) && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={scene.image} alt="" draggable={false} className="absolute inset-0 h-full w-full" />
+            <img src={imageUrl(scene.image)} alt="" draggable={false} className="absolute inset-0 h-full w-full" />
           )}
 
           {/* Reference image, placed on the scene image by its fit */}
@@ -1001,7 +1002,7 @@ function ReferenceOverlay({ trace, mapper, sceneW, sceneH, opacity }: { trace: T
         triangles.map((t) => ({ src: t.from, dst: t.to.map(([x, y]) => [(x / 100) * w, (y / 100) * h]) as [Point, Point, Point] })),
       );
     };
-    img.src = trace.image;
+    img.src = imageUrl(trace.image);
     return () => {
       cancelled = true;
     };
@@ -1010,7 +1011,7 @@ function ReferenceOverlay({ trace, mapper, sceneW, sceneH, opacity }: { trace: T
   if (!triangles) {
     return (
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-        <image href={trace.image} x={0} y={0} width={100} height={100} preserveAspectRatio="none" transform={svgMatrix(trace.transform)} opacity={opacity} />
+        <image href={imageUrl(trace.image)} x={0} y={0} width={100} height={100} preserveAspectRatio="none" transform={svgMatrix(trace.transform)} opacity={opacity} />
       </svg>
     );
   }

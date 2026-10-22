@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyAffine, composeAffine, fitAffine, fromPlacement, IDENTITY, invertAffine, type Placement, toPlacement } from "@/lib/affine";
 import { autoAlign } from "@/lib/auto-align";
+import { backupJson, editorStorage, restoreImages, saveProject } from "@/lib/browser-store";
 import { generateFromReference, type GenerateMode } from "@/lib/generate";
 import { centroid, pointInPolygon, round2 } from "@/lib/geometry";
 import { formatId, parseId, parseIdList, readingOrder } from "@/lib/ids";
@@ -431,6 +432,17 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
   // ---- JSON: save / download / copy / import ----
   /** Writes data/project.json. Resolves true when saved. */
   const save = useCallback(async () => {
+    if (editorStorage() === "browser") {
+      try {
+        await saveProject(project);
+        setSavedJson(json);
+        say("Saved in this browser — Download backup (JSON ▾) to keep a copy");
+        return true;
+      } catch (e) {
+        say(`Save failed: ${(e as Error).message}`, true);
+        return false;
+      }
+    }
     const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: json });
     if (res.ok) {
       setSavedJson(json);
@@ -439,7 +451,7 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     }
     say(`Save failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`, true);
     return false;
-  }, [json, say]);
+  }, [json, project, say]);
 
   /** What "replace" would remove: the scene's earlier results of the same kinds —
    *  its areas (when adding areas / plots), its pins in the amenity types being
@@ -478,6 +490,10 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     // Open the tab now (inside the click) so popup blockers allow it.
     const tab = window.open("about:blank", "_blank");
     if (dirty && !(await save())) return tab?.close();
+    if (editorStorage() === "browser") {
+      if (tab) tab.location.href = `/preview?scene=${encodeURIComponent(scene.id)}`;
+      return;
+    }
     if (!scene.shapes.length) say("This scene has no shapes yet — detect or draw some, then Save", true);
     if (tab) tab.location.href = sceneHref(scene.id);
   };
@@ -508,8 +524,10 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
 
   const importJson = async (file: File) => {
     try {
-      const data = JSON.parse(await file.text()) as Project;
-      if (!Array.isArray(data.scenes)) throw new Error("no scenes");
+      const parsed = JSON.parse(await file.text()) as Project & { images?: Record<string, string> };
+      if (!Array.isArray(parsed.scenes)) throw new Error("no scenes");
+      // A backup from the hosted editor carries its images inline.
+      const data = parsed.images ? await restoreImages(parsed) : parsed;
       history.set({ ...data, categories: data.categories ?? [] });
       setSceneId(data.startScene || data.scenes[0]?.id);
       say("Imported — Save to keep it");
@@ -803,7 +821,12 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
               sceneTitle={scene?.title}
               selectedCount={selectedIds.length}
               onSave={save}
-              onDownloadProject={() => download("project.json", project)}
+              onDownloadProject={async () => {
+                if (editorStorage() !== "browser") return download("project.json", project);
+                const url = URL.createObjectURL(new Blob([await backupJson(project)], { type: "application/json" }));
+                Object.assign(document.createElement("a"), { href: url, download: `${project.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "project"}.json` }).click();
+                URL.revokeObjectURL(url);
+              }}
               onDownloadScene={() => download(`${scene.id}.json`, scene)}
               onCopyScene={() => {
                 if (pendingWarning()) return;

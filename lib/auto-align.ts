@@ -1,4 +1,5 @@
 import type { Affine } from "./types";
+import { imageUrl } from "./browser-store";
 
 /**
  * Automatic alignment of the plotting image onto the development image, for
@@ -42,7 +43,7 @@ function loadGray(src: string, width: number): Promise<Gray> {
       resolve({ data, width: w, height: h });
     };
     img.onerror = () => reject(new Error(`Could not load ${src}`));
-    img.src = src;
+    img.src = imageUrl(src);
   });
 }
 

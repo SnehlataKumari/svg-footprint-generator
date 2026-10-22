@@ -1,4 +1,5 @@
 import { invertAffine } from "./affine";
+import { imageUrl } from "./browser-store";
 import { simplifyClosed } from "./geometry";
 import type { Affine, Point, TraceImage } from "./types";
 import { drawTriangles, traceMapper } from "./warp";
@@ -147,7 +148,7 @@ export function loadPixels(src: string, maxSide = MAX_SAMPLE): Promise<Pixels> {
         }
       };
       img.onerror = () => reject(new Error("Could not load image"));
-      img.src = src;
+      img.src = imageUrl(src);
     });
     cached.catch(() => pixelCache.delete(key));
     pixelCache.set(key, cached);
@@ -589,7 +590,7 @@ function drawAligned(
         resolve(ctx.getImageData(0, 0, width, height).data);
       };
       img.onerror = () => reject(new Error(`Could not load ${src}`));
-      img.src = src;
+      img.src = imageUrl(src);
     });
   }
   return drawAlignedAffine(src, trace.transform, width, height);
@@ -615,7 +616,7 @@ function drawAlignedAffine(src: string, transform: Affine, width: number, height
       resolve(ctx.getImageData(0, 0, width, height).data);
     };
     img.onerror = () => reject(new Error(`Could not load ${src}`));
-    img.src = src;
+    img.src = imageUrl(src);
   });
 }
 

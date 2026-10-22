@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { editorStorage } from "@/lib/browser-store";
 import { STATUS_COLORS, templateCsv, type UnitDetails } from "@/lib/plot-details";
 import type { Project, Scene } from "@/lib/types";
 import { BUTTON, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
@@ -34,14 +35,17 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const [saved, setSaved] = useState<{ file: string; count: number } | null>(null);
 
   const plots = useMemo(() => scene.shapes.filter((s) => s.kind === "polygon"), [scene.shapes]);
-  const [existing, setExisting] = useState<number | null>(null);
+  const [fetchedExisting, setExisting] = useState<number | null>(null);
+  const inBrowser = editorStorage() === "browser";
   useEffect(() => {
     let live = true;
+    if (inBrowser) return;
     fetch("/api/plot-details").then((r) => r.json()).then((d: { details?: Record<string, unknown> }) => live && setExisting(Object.keys(d.details ?? {}).filter((id) => plots.some((p) => p.id === id)).length)).catch(() => {});
     return () => {
       live = false;
     };
-  }, [plots]);
+  }, [plots, inBrowser]);
+  const existing = inBrowser ? Object.keys(project.details ?? {}).filter((id) => plots.some((p) => p.id === id)).length : fetchedExisting;
 
   // each row → the plot it belongs to: same id as its hotspot ID, else same id / label as its plot label
   const matches: Match[] = useMemo(
@@ -92,20 +96,29 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   /** Into the project (editor; Save keeps it): renamed plots and status categories. The details
    *  themselves go to the local JSON file / Contentful, not into the project. */
   const projectChanges = (rename && byLabel.length > 0) || (statusCategories && missingStatus.length > 0);
-  const apply = () => {
-    if (!projectChanges) return;
+  const withChanges = (): Project => {
+    if (!projectChanges) return project;
     const renames = new Map(rename ? byLabel.map((m) => [m.shapeId!, m.row.details.hotspotId]) : []);
-    onChange({
+    return {
       ...project,
       categories: statusCategories ? [...project.categories, ...missingStatus.map((st) => ({ id: st.toLowerCase(), label: st, color: STATUS_COLORS[st] }))] : project.categories,
       scenes: project.scenes.map((sc) =>
         sc.id !== scene.id ? sc : { ...sc, shapes: sc.shapes.map((s) => (renames.has(s.id) ? { ...s, id: renames.get(s.id)! } : s)) },
       ),
-    });
+    };
   };
+  const apply = () => projectChanges && onChange(withChanges());
 
   /** Saves the rows to the local JSON file; with `publish`, to Contentful too. */
   const store = async (publish: boolean) => {
+    if (inBrowser) {
+      // Hosted editor: the details go into the project (one undo step), kept by Save.
+      const details = { ...(project.details ?? {}), ...Object.fromEntries(good.map((m) => [m.row.details.hotspotId, m.row.details])) };
+      onChange({ ...withChanges(), details });
+      setSaved({ file: "this project", count: Object.keys(details).length });
+      onStatus(`Added details for ${good.length} plots — Save to keep them`);
+      return;
+    }
     apply();
     setBusy(publish ? `Saving and publishing ${good.length} units to Contentful…` : `Saving ${good.length} plots…`);
     setError(null);
@@ -128,7 +141,7 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
 
   /** The saved details as one JSON file (keyed by hotspot ID), for use elsewhere. */
   const downloadJson = async () => {
-    const data = (await (await fetch("/api/plot-details")).json()) as { details: Record<string, unknown> };
+    const data = inBrowser ? { details: project.details ?? {} } : ((await (await fetch("/api/plot-details")).json()) as { details: Record<string, unknown> });
     const url = URL.createObjectURL(new Blob([JSON.stringify(data.details, null, 2)], { type: "application/json" }));
     Object.assign(document.createElement("a"), { href: url, download: "plot-details.json" }).click();
     URL.revokeObjectURL(url);
@@ -231,7 +244,7 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
           </div>
         )}
 
-        {contentful && !contentful.publish && rows && (
+        {contentful && !contentful.publish && rows && !inBrowser && (
           <p className="rounded-md bg-neutral-100 p-2 text-xs text-neutral-600">
             Details are saved to a local JSON file (<code>data/plot-details/</code>) and the map uses it. Contentful can be added any time: put{" "}
             <code>CONTENTFUL_SPACE_ID</code>, <code>CONTENTFUL_MANAGEMENT_TOKEN</code> and <code>CONTENTFUL_DELIVERY_TOKEN</code> in <code>.env.local</code> (see{" "}
@@ -272,9 +285,9 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
           {!saved && !published && (
             <>
               <button type="button" className={contentful?.publish ? BUTTON : PRIMARY_BUTTON} onClick={() => store(false)} disabled={!good.length || !!busy}>
-                Save to local JSON
+                {inBrowser ? "Add to project" : "Save to local JSON"}
               </button>
-              {contentful?.publish && (
+              {contentful?.publish && !inBrowser && (
                 <button type="button" className={PRIMARY_BUTTON} onClick={() => store(true)} disabled={!good.length || !!busy}>
                   Save & publish to Contentful
                 </button>
