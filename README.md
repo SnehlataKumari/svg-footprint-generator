@@ -134,6 +134,38 @@ than brightness, so roofs and roads under one wash stay together); drops what
 isn't a wash over the picture (logos, buttons, the legend); outlines each area
 and reads the light text inside it (OCR).
 
+### Facilities from a spreadsheet + GIS map
+
+**In the editor:** **Projects ▾ → Import from GIS files…** — give the project a
+name, pick the facilities spreadsheet (.xlsx), the map PDF, the masterplan image
+and the phase images folder (only images + world files are uploaded), tick
+*Carry over plots* if the open project already has plots on a phase image, and
+click **Import** (1–2 minutes). Then **Open** the new project. Same result as
+the command below.
+
+When the facilities are listed in a spreadsheet (plot ID, type EN/AR, cluster,
+area…) and drawn on a GIS map exported as a **GeoPDF** (ArcGIS / QGIS: each
+facility filled in its type's colour and labelled with its plot ID, phases
+outlined and labelled), and the phase images come with **world files**
+(`.wpw`, `.jgw`, `.pgw`…), one command builds a whole project:
+
+```bash
+npm run import:facilities -- --xlsx facilities.xlsx --pdf facilities.pdf \
+  --masterplan masterplan.webp --phases "Phase images folder" \
+  --title "Al Metlaa" [--plots-from data/project.json:mt12]
+```
+
+- every facility outlined from the map, named by its plot ID, with its
+  spreadsheet row as details (type EN/AR, cluster, area, parking) and an icon
+  pin; one category per type (the map's colour + a built-in icon);
+- the **masterplan** as the start scene (located by finding the georeferenced
+  phase images in it), with each **phase** outlined and opening its own scene;
+- a **scene per phase image**, its facilities placed exactly from the world files;
+- `--plots-from` carries existing plots into the phase that uses the same image.
+
+It writes `data/projects/<title>.json` (open it from **Projects ▾**) and the
+images to `public/scenes/<title>/`. Needs poppler (`pdftotext`, `pdftoppm`).
+
 ### Plots + numbers straight from the reference (script)
 
 When the reference is your render with plot lines and **labels** drawn on it

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BUTTON, INPUT, LABEL, PRIMARY_BUTTON } from "../ui";
+import { ImportFacilities } from "./import-facilities";
 
 interface Entry {
   name: string;
@@ -29,6 +30,7 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
   const [projects, setProjects] = useState<Entry[] | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -58,6 +60,7 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
 
   return (
     <div className="space-y-2">
+      {importing && <ImportFacilities onClose={() => setImporting(false)} onOpen={(name) => switchTo({ action: "open", name })} />}
       <button type="button" className={`${BUTTON} w-full justify-between`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span>Projects</span>
         <span className="text-xs opacity-60">{open ? "▴" : "▾"}</span>
@@ -80,6 +83,14 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
               “{title}” is {dirty ? "saved, then " : ""}kept under <code>data/projects/</code> — open it again from the list below.
             </p>
           </form>
+
+          <div className="space-y-1">
+            <span className={LABEL}>From GIS files</span>
+            <button type="button" className={`${BUTTON} w-full`} disabled={busy} onClick={() => setImporting(true)}>
+              Import from GIS files…
+            </button>
+            <p className="text-xs text-neutral-500">Facilities spreadsheet + map PDF + masterplan + phase images → a ready project.</p>
+          </div>
 
           <div className="space-y-1">
             <span className={LABEL}>Other projects</span>
