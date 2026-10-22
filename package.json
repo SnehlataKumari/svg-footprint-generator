@@ -1,0 +1,37 @@
+{
+  "name": "interactive-map-poc",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "plots:from-reference": "node --max-old-space-size=8192 scripts/plots-from-reference.mjs",
+    "areas:from-reference": "node scripts/areas-from-reference.mjs",
+    "lines:from-reference": "node scripts/lines-from-reference.mjs",
+    "amenities:from-reference": "node scripts/amenities-from-reference.mjs"
+  },
+  "dependencies": {
+    "gsap": "^3.15.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
