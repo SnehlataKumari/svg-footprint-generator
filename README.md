@@ -211,7 +211,16 @@ them as JSON for other front ends.
 name, pick the facilities spreadsheet (.xlsx), the map PDF, the masterplan image
 and the phase images folder (only images + world files are uploaded), tick
 *Carry over plots* if the open project already has plots on a phase image, and
-click **Import** (1–2 minutes). Then **Open** the new project. Same result as
+click **Import** (1–2 minutes). Then **Open** the new project.
+
+**Into a scene you already have:** open the phase scene and click
+**Facilities from GIS files…** (end of the bar above the image). Pick the same
+spreadsheet and map PDF plus the **world file of that scene's image** (e.g.
+`MT11.wpw` for `MT11.webp`): the facilities on the image are added — outlines,
+icons, details and their categories — in one undo step, in about 15 seconds.
+A world file named after a cluster (`MT11`) brings only that cluster's
+facilities. Running it again updates them (same plot IDs). The scene's image
+must be the picture the world file belongs to, at its original size. Same result as
 the command below — in the hosted editor too (see *The hosted editor* above).
 
 When the facilities are listed in a spreadsheet (plot ID, type EN/AR, cluster,

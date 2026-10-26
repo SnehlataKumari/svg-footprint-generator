@@ -30,6 +30,11 @@
  * words: { width, height, words: [{ text, x0, y0, x1, y1 }] } in page points,
  * y down) plus `--no-copy`: images stay where they are and each scene's image
  * is its file name, for the browser to swap for the copy it stores.
+ *
+ * One scene of an open project (editor: Add facilities from GIS files):
+ *   --into <world file> --size <width>x<height> --out result.json
+ * instead of --masterplan / --phases: the facilities lying on that image,
+ * placed by its world file, as { shapes, categories } — no new project.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
@@ -45,7 +50,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const need = (name) => opt(name) ?? (console.error(`Missing ${name}`), process.exit(1));
-const XLSX = need("--xlsx"), PDF = need("--pdf"), MASTER = need("--masterplan"), PHASES = need("--phases");
+const INTO = opt("--into"), SIZE = opt("--size")?.split("x").map(Number);
+const XLSX = need("--xlsx"), PDF = need("--pdf"), MASTER = INTO ? null : need("--masterplan"), PHASES = INTO ? null : need("--phases");
 const TITLE = opt("--title") ?? "Facilities";
 const SLUG = opt("--slug") ?? (TITLE.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "facilities"); // images go to public/scenes/<slug>/
 const OUT = path.resolve(opt("--out") ?? path.join(ROOT, "data", "projects", `${SLUG}.json`));
@@ -264,6 +270,52 @@ for (const [k, f] of found.entries()) {
 const placed = found.filter((f) => f.world);
 log(`3/6 Facilities: ${placed.length} of ${facilities.length} outlined on the map`);
 
+const pct = (x, w) => Math.round((x / w) * 10000) / 100;
+const centroid = (P) => P.reduce((s, q) => [s[0] + q[0] / P.length, s[1] + q[1] / P.length], [0, 0]);
+const inside = ([x, y], P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > y) !== (P[j][1] > y) && x < ((P[j][0] - P[i][0]) * (y - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+// one category per type: the map's colour, a built-in icon by name
+const ICONS = [[/retail|shop|mall|commercial/i, "shopping"], [/nursery|kindergarten|elc/i, "playground"], [/school|education|academy/i, "school"], [/mosque|masjid/i, "mosque"], [/medical|clinic|health|hospital/i, "health"], [/sport|gym|fitness/i, "gym"], [/majlis|community/i, "community"], [/park|garden|green/i, "park"], [/petrol|fuel|gas station/i, "landmark"], [/service/i, "info"], [/housing|residential/i, "community"]];
+const hex = (c) => `#${c.map((v) => Math.min(255, v).toString(16).padStart(2, "0")).join("")}`;
+const categories = [];
+for (const f of placed) {
+  const id = slug(f.type);
+  if (!categories.some((c) => c.id === id)) categories.push({ id, label: f.type, color: hex(f.color), icon: `builtin:${ICONS.find(([re]) => re.test(f.type))?.[1] ?? "info"}` });
+  f.category = id;
+}
+const infoOf = (f) => Object.fromEntries([["Type", f.type], ["النوع", f.typeAr], ["Plot ID", f.id], ["Cluster", f.cluster], ["Plot area", f.area ? `${Math.round(Number(f.area)).toLocaleString("en")} m²` : ""], ["Parking", f.parking]].filter(([, v]) => v));
+const facilityShapes = (f, toPct) => {
+  const points = f.world.map(toPct);
+  return [
+    { id: f.id, label: `${f.type} · ${f.id}`, kind: "polygon", category: f.category, points, info: infoOf(f) },
+    { id: `${f.id}-icon`, label: `${f.type} · ${f.id}`, kind: "pin", category: f.category, points: [centroid(points).map((v) => Math.round(v * 100) / 100)], info: infoOf(f) },
+  ];
+};
+/** A world file (.wpw / .jgw …): image pixel corner → world. */
+const readWorld = (wf) => {
+  const [A, D, B, E, C, F] = readFileSync(wf, "utf8").trim().split(/\s+/).map(Number);
+  return [A, B, C - A / 2 - B / 2, D, E, F - D / 2 - E / 2];
+};
+
+// ---------------------------------------------------------------- one scene only
+if (INTO) {
+  const [w, h] = SIZE ?? [];
+  if (!(w > 0 && h > 0)) throw new Error("Missing --size <width>x<height>");
+  const toPx = invert(readWorld(INTO));
+  const toPct = (wp) => { const [x, y] = apply(toPx, wp); return [pct(x, w), pct(y, h)]; };
+  // the facilities on this image (a few % over the edge is fine) — only the
+  // phase's own when the world file is named like a cluster (MT11.wpw → MT11)
+  const phase = path.basename(INTO).replace(/\.[^.]+$/, "");
+  const own = placed.some((f) => f.cluster === phase);
+  const onImage = (sh) => sh.points.every(([x, y]) => x > -5 && y > -5 && x < 105 && y < 105);
+  const shapes = placed.filter((f) => !own || f.cluster === phase).map((f) => facilityShapes(f, toPct)).filter(([outline]) => onImage(outline)).flat();
+  const used = new Set(shapes.map((sh) => sh.category));
+  writeFileSync(OUT, JSON.stringify({ shapes, categories: categories.filter((c) => used.has(c.id)) }));
+  rmSync(tmp, { recursive: true, force: true });
+  log(`${shapes.length / 2} of ${placed.length} facilities lie on this image${own ? ` (cluster ${phase})` : ""}`);
+  process.exit(0);
+}
+
 // phases: the areas inside the thick outlines, labelled MT01…
 const thick = new Uint8Array(PN);
 {
@@ -300,8 +352,7 @@ const worldFileOf = (img) => {
 const phaseImages = readdirSync(PHASES).filter((f) => /\.(webp|png|jpe?g|tiff?)$/i.test(f)).sort().map((f) => {
   const file = path.join(PHASES, f), wf = worldFileOf(file);
   if (!wf) return null;
-  const [A, D, B, E, C, F] = readFileSync(wf, "utf8").trim().split(/\s+/).map(Number);
-  return { name: f.replace(/\.[^.]+$/, ""), file, world: [A, B, C - A / 2 - B / 2, D, E, F - D / 2 - E / 2] }; // pixel corner → world
+  return { name: f.replace(/\.[^.]+$/, ""), file, world: readWorld(wf) };
 }).filter(Boolean);
 for (const im of phaseImages) { const m = await sharp(im.file, { limitInputPixels: false }).metadata(); im.w = m.width; im.h = m.height; im.toPx = invert(im.world); }
 log(`4/6 Phase images with world files: ${phaseImages.map((p) => p.name).join(", ")}`);
@@ -376,28 +427,7 @@ if (!NO_COPY) {
   mkdirSync(sceneDir, { recursive: true });
   await sharp(MASTER, { limitInputPixels: false }).resize(Math.round(MW * mScale)).webp({ quality: 86 }).toFile(path.join(sceneDir, "masterplan.webp"));
 }
-const pct = (x, w) => Math.round((x / w) * 10000) / 100;
 const toMasterPct = (wp) => { const [x, y] = apply(worldToMaster, wp); return [pct(x, MW), pct(y, MH)]; };
-const centroid = (P) => P.reduce((s, q) => [s[0] + q[0] / P.length, s[1] + q[1] / P.length], [0, 0]);
-const inside = ([x, y], P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > y) !== (P[j][1] > y) && x < ((P[j][0] - P[i][0]) * (y - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
-const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-// one category per type: the map's colour, a built-in icon by name
-const ICONS = [[/retail|shop|mall|commercial/i, "shopping"], [/nursery|kindergarten|elc/i, "playground"], [/school|education|academy/i, "school"], [/mosque|masjid/i, "mosque"], [/medical|clinic|health|hospital/i, "health"], [/sport|gym|fitness/i, "gym"], [/majlis|community/i, "community"], [/park|garden|green/i, "park"], [/petrol|fuel|gas station/i, "landmark"], [/service/i, "info"], [/housing|residential/i, "community"]];
-const hex = (c) => `#${c.map((v) => Math.min(255, v).toString(16).padStart(2, "0")).join("")}`;
-const categories = [];
-for (const f of placed) {
-  const id = slug(f.type);
-  if (!categories.some((c) => c.id === id)) categories.push({ id, label: f.type, color: hex(f.color), icon: `builtin:${ICONS.find(([re]) => re.test(f.type))?.[1] ?? "info"}` });
-  f.category = id;
-}
-const infoOf = (f) => Object.fromEntries([["Type", f.type], ["النوع", f.typeAr], ["Plot ID", f.id], ["Cluster", f.cluster], ["Plot area", f.area ? `${Math.round(Number(f.area)).toLocaleString("en")} m²` : ""], ["Parking", f.parking]].filter(([, v]) => v));
-const facilityShapes = (f, toPct) => {
-  const points = f.world.map(toPct);
-  return [
-    { id: f.id, label: `${f.type} · ${f.id}`, kind: "polygon", category: f.category, points, info: infoOf(f) },
-    { id: `${f.id}-icon`, label: `${f.type} · ${f.id}`, kind: "pin", category: f.category, points: [centroid(points).map((v) => Math.round(v * 100) / 100)], info: infoOf(f) },
-  ];
-};
 const sceneIdOf = (name) => slug(name);
 const masterShapes = [
   ...phases.filter((p) => phaseImages.some((im) => im.name === p.name)).map((p) => ({

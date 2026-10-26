@@ -19,6 +19,7 @@ import { JsonEditor, type JsonScope } from "./json-editor";
 import { ReferencePanel } from "./reference-panel";
 import { createStore, type LinkedCursor, ReferencePane, type SceneView } from "./reference-pane";
 import { ProjectPanel } from "./project-panel";
+import { SceneFacilities } from "./scene-facilities";
 import { ShapePanel } from "./shape-panel";
 import { DEFAULT_NUMBERING, DetectPanel, GeneratePanel, idAt, JsonMenu, type Numbering, NumberPanel, WandPanel } from "./tool-panels";
 import { useHistory } from "./use-history";
@@ -114,6 +115,7 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
   const [autoAligning, setAutoAligning] = useState<string | null>(null);
   const [replaceExisting, setReplaceExisting] = useState(true);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [facilitiesOpen, setFacilitiesOpen] = useState(false);
   /** The kinds to generate — several at once is fine (areas + amenity icons…). */
   const [generateModes, setGenerateModes] = useState<GenerateMode[]>(["areas"]);
   /** What the orange results came from, for the wording ("11 areas", "42 shapes"). */
@@ -313,6 +315,24 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     say(
       `${replacing ? `Replaced ${replaceWhat} with` : "Added"} ${fresh.length} ${pendingNoun} (${fresh[0].id} … ${fresh[fresh.length - 1].id}) — Save to keep them. Ctrl+Z undoes.`,
     );
+  };
+
+  // ---- Facilities from GIS files ----
+  /** One undo step: the facilities (outline + icon each) and their new categories; same plot ID = updated in place of the old. */
+  const addFacilities = (fresh: Shape[], categories: Category[], summary: string) => {
+    if (!scene) return;
+    const ids = new Set(fresh.map((s) => s.id));
+    const count = (shapes: Shape[]) => shapes.filter((s) => s.kind === "polygon").length;
+    const updated = count(scene.shapes.filter((s) => ids.has(s.id)));
+    setProject((p) => ({
+      ...p,
+      categories: [...p.categories, ...categories.filter((c) => !p.categories.some((pc) => pc.id === c.id))],
+      scenes: p.scenes.map((sc) => (sc.id === scene.id ? { ...sc, shapes: [...sc.shapes.filter((s) => !ids.has(s.id)), ...fresh] } : sc)),
+    }));
+    setSelectedIds(fresh.map((s) => s.id));
+    setFacilitiesOpen(false);
+    const added = count(fresh) - updated;
+    say(`${summary}: ${added} added${updated ? `, ${updated} updated` : ""} — Save to keep them. Ctrl+Z undoes.`);
   };
 
   // ---- Generate from reference ----
@@ -953,8 +973,17 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
                 </span>
               </>
             )}
+            <button
+              type="button"
+              className={`${BUTTON} ml-auto h-7 text-xs`}
+              title="Facilities from a spreadsheet + GeoPDF map, placed by this image's world file"
+              onClick={() => setFacilitiesOpen(true)}
+            >
+              Facilities from GIS files…
+            </button>
           </div>
         )}
+        {facilitiesOpen && scene && <SceneFacilities scene={scene} onClose={() => setFacilitiesOpen(false)} onAdd={addFacilities} />}
 
         {align && (
           <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-3 py-2 text-sm">
