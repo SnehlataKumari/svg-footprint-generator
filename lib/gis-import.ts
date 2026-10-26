@@ -1,5 +1,5 @@
 import { addProject, editorStorage, imageUrl, openedProject, storeImage } from "./browser-store";
-import type { Category, Project, Shape } from "./types";
+import type { Category, Project, Scene, Shape } from "./types";
 import { blobUpload, DIRECT_BYTES } from "./upload";
 
 /**
@@ -11,7 +11,8 @@ import { blobUpload, DIRECT_BYTES } from "./upload";
  * as they are instead (components/editor/import-facilities.tsx).
  *
  * facilitiesForScene: the same, for one scene of the open project — the
- * facilities lying on its image, placed by the image's world file.
+ * facilities lying on its image, placed by the image's world file, or without
+ * one by lining the scene's plots up with the map's plot lines.
  */
 export interface GisFiles {
   title: string;
@@ -175,15 +176,20 @@ export async function importInBrowser(files: GisFiles, onStep: (step: string) =>
 
 export type SceneFacilitiesResult = { shapes: Shape[]; categories: Category[]; log: string } | { error: string };
 
-/** The facilities on one scene's image: `world` is the world file that came with it, `size` its pixel size. */
-export async function facilitiesForScene(
-  files: { xlsx: File; pdf: File; world: File; size: { width: number; height: number } },
-  onStep: (step: string) => void,
-): Promise<SceneFacilitiesResult> {
+/** The phase a scene shows, from its title or id ("MT01", "MT01 – Phase 1" → MT01), as the map labels it. */
+export const phaseOf = (scene: Scene) => `${scene.title} ${scene.id}`.toUpperCase().match(/\b[A-Z]{1,4}\d{2}\b/)?.[0] ?? null;
+
+/** The facilities on one scene's image: placed by `world` (the world file that came with the image) or, without one, by the scene's plots. */
+export async function facilitiesForScene(files: { xlsx: File; pdf: File; world: File | null }, scene: Scene, onStep: (step: string) => void): Promise<SceneFacilitiesResult> {
   const body = new FormData();
   body.append("xlsx", files.xlsx);
-  body.append("world", files.world, files.world.name);
-  body.append("size", `${files.size.width}x${files.size.height}`);
+  if (files.world) {
+    body.append("world", files.world, files.world.name);
+    body.append("size", `${scene.width}x${scene.height}`);
+  } else {
+    const plots = scene.shapes.filter((s) => s.kind === "polygon").map((s) => s.points);
+    body.append("fit", JSON.stringify({ phase: phaseOf(scene), width: scene.width, height: scene.height, plots }));
+  }
   if (editorStorage() === "browser") {
     onStep("Reading the map PDF…");
     const { page, words } = await readPdf(files.pdf);

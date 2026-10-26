@@ -217,12 +217,16 @@ click **Import** (1–2 minutes). Then **Open** the new project.
 
 **Into a scene you already have:** open the phase scene and click
 **Facilities from GIS files…** (end of the bar above the image). Pick the same
-spreadsheet and map PDF plus the **world file of that scene's image** (e.g.
-`MT11.wpw` for `MT11.webp`): the facilities on the image are added — outlines,
-icons, details and their categories — in one undo step, in about 15 seconds.
-A world file named after a cluster (`MT11`) brings only that cluster's
-facilities. Running it again updates them (same plot IDs). The scene's image
-must be the picture the world file belongs to, at its original size. Same result as
+spreadsheet and map PDF: the facilities on the image are added — outlines,
+icons, details and their categories — in one undo step, in 10–20 seconds.
+The scene is found on the map by itself when it already has its plots
+(Generate → Numbered plots) and is named like its phase (`MT01`): its plot
+outlines are lined up with the map's thin plot lines (on Al Metlaa within
+0.1% of the world-file placement; a poor match is refused). Scenes without
+plots need the **world file of their image** (e.g. `MT11.wpw` for
+`MT11.webp`, optional otherwise — it is exact), and the image must be the
+picture the world file belongs to, at its original size. Only the phase's own
+cluster is added; running it again updates them (same plot IDs). Same result as
 the command below — in the hosted editor too (see *The hosted editor* above).
 
 When the facilities are listed in a spreadsheet (plot ID, type EN/AR, cluster,
