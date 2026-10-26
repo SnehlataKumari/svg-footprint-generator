@@ -1,5 +1,6 @@
 import { editorStorage, imageUrl } from "./browser-store";
 import type { Affine, Category, Scene, Shape } from "./types";
+import { blobUpload, DIRECT_BYTES } from "./upload";
 
 /**
  * "Generate from reference" (editor): app/api/generate runs a tracing script
@@ -34,9 +35,6 @@ export async function generateFromReference(mode: GenerateMode, scene: Scene): P
   return (await res.json().catch(() => ({ error: `Generate failed (${res.status})` }))) as GenerateResult;
 }
 
-// Vercel takes 4.5 MB per request; bigger images go through Vercel Blob first.
-const DIRECT_BYTES = 4 * 1024 * 1024;
-
 /** Hosted editor: the images live in this browser, so they go with the request. */
 async function sendWithImages(mode: GenerateMode, scene: Scene): Promise<Response> {
   const read = async (src: string) => {
@@ -46,14 +44,7 @@ async function sendWithImages(mode: GenerateMode, scene: Scene): Promise<Respons
   };
   const [image, reference] = await Promise.all([read(scene.image), read(scene.trace?.image ?? "")]);
   const viaBlob = image.size + reference.size > DIRECT_BYTES;
-  const send = async (name: string, file: Blob) => {
-    if (!viaBlob) return file;
-    const { upload } = await import("@vercel/blob/client");
-    const blob = await upload(`generate/${name}`, file, { access: "private", handleUploadUrl: "/api/generate/upload", contentType: file.type || undefined }).catch((e: Error) => {
-      throw new Error(`The images are too big to send directly and the upload failed: ${e.message}`);
-    });
-    return blob.url;
-  };
+  const send = (name: string, file: Blob) => (viaBlob ? blobUpload(`generate/${name}`, file) : file);
   const body = new FormData();
   body.append("mode", mode);
   body.append("scene", JSON.stringify({ ...scene, shapes: [] }));

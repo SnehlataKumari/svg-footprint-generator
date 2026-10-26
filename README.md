@@ -61,7 +61,11 @@ visitor's own browser** (IndexedDB) instead of `data/` and `public/`:
   project (Storage → Blob; it sets `BLOB_READ_WRITE_TOKEN`). Plots on a big
   map take 1–3 minutes: Vercel's function time limit (`maxDuration` 300 s)
   and memory (2 GB default) apply; if a run is cut off, use `npm run dev`.
-- **Import from GIS files** needs the desktop version (`npm run dev`).
+- **Import from GIS files** works too: the browser reads the map PDF itself
+  (pdf.js — no poppler on Vercel), the site runs the import and sends the
+  project back, and it is saved in your browser like any other. The masterplan,
+  phase images and PDF are well over 4.5 MB together, so this needs the same
+  **Vercel Blob** store. *Carry over plots* uses the open project as last saved.
 
 The public viewer (`/`, `/scene/<id>`) still shows the deployed `data/project.json`.
 To publish a map there, download it from the hosted editor, put it in
@@ -208,7 +212,7 @@ name, pick the facilities spreadsheet (.xlsx), the map PDF, the masterplan image
 and the phase images folder (only images + world files are uploaded), tick
 *Carry over plots* if the open project already has plots on a phase image, and
 click **Import** (1–2 minutes). Then **Open** the new project. Same result as
-the command below.
+the command below — in the hosted editor too (see *The hosted editor* above).
 
 When the facilities are listed in a spreadsheet (plot ID, type EN/AR, cluster,
 area…) and drawn on a GIS map exported as a **GeoPDF** (ArcGIS / QGIS: each

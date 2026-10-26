@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { editorStorage } from "@/lib/browser-store";
+import { importInBrowser } from "@/lib/gis-import";
 import { BUTTON, INPUT, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
 
 /** Image and world-file names a phase folder may hold (the rest — pyramids, stats — is skipped). */
@@ -18,6 +20,7 @@ interface Props {
  * masterplan + the phase images with world files → a new project with the
  * masterplan, a scene per phase, and every facility outlined, filled in and
  * shown with an icon (app/api/import-facilities, scripts/import-facilities.mjs).
+ * The hosted editor reads the PDF and keeps the result in the browser (lib/gis-import.ts).
  */
 export function ImportFacilities({ onClose, onOpen }: Props) {
   const [title, setTitle] = useState("");
@@ -28,6 +31,7 @@ export function ImportFacilities({ onClose, onOpen }: Props) {
   const [carryPlots, setCarryPlots] = useState(true);
   const [busy, setBusy] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [step, setStep] = useState("Importing…");
   const [result, setResult] = useState<{ name: string; title: string; summary: string[] } | { error: string } | null>(null);
 
   useEffect(() => {
@@ -42,19 +46,27 @@ export function ImportFacilities({ onClose, onOpen }: Props) {
 
   const run = async () => {
     setSeconds(0);
+    setStep("Importing…");
     setBusy(true);
     setResult(null);
     try {
-      const body = new FormData();
-      body.append("title", title.trim() || masterplan?.name.replace(/\.[^.]+$/, "") || "Imported project");
-      body.append("xlsx", xlsx!);
-      body.append("pdf", pdf!);
-      body.append("masterplan", masterplan!);
-      for (const f of phases) body.append("phases", f, f.name);
-      body.append("carryPlots", carryPlots ? "1" : "0");
-      const res = await fetch("/api/import-facilities", { method: "POST", body });
-      const data = (await res.json().catch(() => ({}))) as { name?: string; title?: string; log?: string; error?: string };
-      if (!res.ok || !data.name) return setResult({ error: data.error ?? `Import failed (${res.status})` });
+      const name = title.trim() || masterplan?.name.replace(/\.[^.]+$/, "") || "Imported project";
+      let data: { name?: string; title?: string; log?: string; error?: string };
+      if (editorStorage() === "browser") {
+        data = await importInBrowser({ title: name, xlsx: xlsx!, pdf: pdf!, masterplan: masterplan!, phases, carryPlots }, setStep);
+      } else {
+        const body = new FormData();
+        body.append("title", name);
+        body.append("xlsx", xlsx!);
+        body.append("pdf", pdf!);
+        body.append("masterplan", masterplan!);
+        for (const f of phases) body.append("phases", f, f.name);
+        body.append("carryPlots", carryPlots ? "1" : "0");
+        const res = await fetch("/api/import-facilities", { method: "POST", body });
+        data = await res.json().catch(() => ({ error: `Import failed (${res.status})` }));
+        if (!res.ok) data.error ??= `Import failed (${res.status})`;
+      }
+      if (data.error || !data.name) return setResult({ error: data.error ?? "Import failed" });
       // the script's step lines make a readable summary
       const summary = (data.log ?? "")
         .split("\n")
@@ -133,7 +145,7 @@ export function ImportFacilities({ onClose, onOpen }: Props) {
         )}
 
         <div className="flex items-center justify-end gap-2">
-          {busy && <span className="mr-auto text-sm text-neutral-600">Importing… {seconds}s (usually 1–2 minutes)</span>}
+          {busy && <span className="mr-auto text-sm text-neutral-600">{step} {seconds}s (usually 1–2 minutes)</span>}
           <button type="button" className={BUTTON} onClick={onClose} disabled={busy}>
             {result && "name" in result ? "Close" : "Cancel"}
           </button>

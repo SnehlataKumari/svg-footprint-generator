@@ -1,9 +1,10 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 
 /**
- * Hosted editor, Generate: images too big to send with the request (Vercel
- * takes 4.5 MB per request) go to Vercel Blob first — this hands the browser
- * a short-lived upload token. app/api/generate deletes them once read.
+ * Hosted editor, Generate and Import from GIS files: files too big to send
+ * with the request (Vercel takes 4.5 MB per request) go to Vercel Blob first —
+ * this hands the browser a short-lived upload token (lib/upload.ts).
+ * app/api/generate and app/api/import-facilities delete them once read.
  * Needs a Blob store connected to the Vercel project (BLOB_READ_WRITE_TOKEN).
  */
 export async function POST(request: Request) {
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
       body: (await request.json()) as HandleUploadBody,
       request,
       onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ["image/*"],
+        allowedContentTypes: ["image/*", "application/pdf"],
         maximumSizeInBytes: 200 * 1024 * 1024,
         addRandomSuffix: true,
       }),

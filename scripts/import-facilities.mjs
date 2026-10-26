@@ -24,6 +24,12 @@
  *   images in it.
  * Uses poppler's pdftotext / pdftoppm. Writes the project to data/projects/
  * (open it from the editor's Projects menu) and the images to public/scenes/<slug>/.
+ *
+ * The hosted editor (no poppler, read-only disk) reads the PDF in the browser
+ * and passes `--page page.png --words words.json` (the page rendered, and its
+ * words: { width, height, words: [{ text, x0, y0, x1, y1 }] } in page points,
+ * y down) plus `--no-copy`: images stay where they are and each scene's image
+ * is its file name, for the browser to swap for the copy it stores.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
@@ -44,6 +50,8 @@ const TITLE = opt("--title") ?? "Facilities";
 const SLUG = opt("--slug") ?? (TITLE.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "facilities"); // images go to public/scenes/<slug>/
 const OUT = path.resolve(opt("--out") ?? path.join(ROOT, "data", "projects", `${SLUG}.json`));
 const PLOTS_FROM = opt("--plots-from"); // "<project.json>[:<sceneId>]" — plots to carry into the phase that uses the same image
+const PAGE = opt("--page"), WORDS = opt("--words"); // the PDF already read (hosted editor) — no poppler needed
+const NO_COPY = args.includes("--no-copy");
 const log = (...m) => console.log(...m);
 const tmp = mkdtempSync(path.join(tmpdir(), "import-facilities-"));
 
@@ -120,7 +128,8 @@ function fitAffine(pairs) {
 }
 const apply = ([a, b, c, d, e, f], [x, y]) => [a * x + b * y + c, d * x + e * y + f];
 const invert = ([a, b, c, d, e, f]) => { const det = a * e - b * d; return [e / det, -b / det, (b * f - c * e) / det, -d / det, a / det, (c * d - a * f) / det]; };
-const PAGE_H = Number(execFileSync("pdfinfo", [PDF]).toString().match(/Page size:\s*[\d.]+ x ([\d.]+)/)[1]);
+const read = WORDS && JSON.parse(readFileSync(WORDS, "utf8"));
+const PAGE_H = read ? read.height : Number(execFileSync("pdfinfo", [PDF]).toString().match(/Page size:\s*[\d.]+ x ([\d.]+)/)[1]);
 // page points with y down (as pdftotext gives them) → world
 const pageToWorld = fitAffine([0, 1, 2, 3].map((i) => {
   const u = lpts[i * 2], v = lpts[i * 2 + 1];
@@ -129,13 +138,15 @@ const pageToWorld = fitAffine([0, 1, 2, 3].map((i) => {
 log(`2/6 Map PDF: registered in UTM zone ${zone}N`);
 
 // labels with their positions
-const words = [...execFileSync("pdftotext", ["-bbox", PDF, "-"]).toString().matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g)]
-  .map((m) => ({ x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4], text: m[5] }));
+const words = read
+  ? read.words
+  : [...execFileSync("pdftotext", ["-bbox", PDF, "-"]).toString().matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g)]
+      .map((m) => ({ x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4], text: m[5] }));
 // render the page
-const DPI = 600, K = DPI / 72;
-execFileSync("pdftoppm", ["-r", String(DPI), "-png", "-singlefile", PDF, path.join(tmp, "page")]);
-const page = await sharp(path.join(tmp, "page.png"), { limitInputPixels: false }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+if (!PAGE) execFileSync("pdftoppm", ["-r", "600", "-png", "-singlefile", PDF, path.join(tmp, "page")]);
+const page = await sharp(PAGE ?? path.join(tmp, "page.png"), { limitInputPixels: false }).flatten({ background: "#ffffff" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
 const PW = page.info.width, PH = page.info.height, PN = PW * PH, PX = page.data;
+const K = read ? PW / read.width : 600 / 72; // page px per point
 const rgbAt = (i) => [PX[i * 3], PX[i * 3 + 1], PX[i * 3 + 2]];
 const pxToWorld = ([x, y]) => apply(pageToWorld, [(x + 0.5) / K, (y + 0.5) / K]);
 
@@ -360,9 +371,11 @@ log(`    masterplan ↔ world fitted from ${phaseImages.length} phases: average 
 
 // ---------------------------------------------------------------- 6. the project
 const sceneDir = path.join(ROOT, "public", "scenes", SLUG);
-mkdirSync(sceneDir, { recursive: true });
-const MAX = 6000, mScale = Math.min(1, MAX / MW);
-await sharp(MASTER, { limitInputPixels: false }).resize(Math.round(MW * mScale)).webp({ quality: 86 }).toFile(path.join(sceneDir, "masterplan.webp"));
+const MAX = 6000, mScale = NO_COPY ? 1 : Math.min(1, MAX / MW);
+if (!NO_COPY) {
+  mkdirSync(sceneDir, { recursive: true });
+  await sharp(MASTER, { limitInputPixels: false }).resize(Math.round(MW * mScale)).webp({ quality: 86 }).toFile(path.join(sceneDir, "masterplan.webp"));
+}
 const pct = (x, w) => Math.round((x / w) * 10000) / 100;
 const toMasterPct = (wp) => { const [x, y] = apply(worldToMaster, wp); return [pct(x, MW), pct(y, MH)]; };
 const centroid = (P) => P.reduce((s, q) => [s[0] + q[0] / P.length, s[1] + q[1] / P.length], [0, 0]);
@@ -393,7 +406,7 @@ const masterShapes = [
   })),
   ...placed.flatMap((f) => facilityShapes(f, toMasterPct)),
 ];
-const scenes = [{ id: "masterplan", title: TITLE, image: `/scenes/${SLUG}/masterplan.webp`, width: Math.round(MW * mScale), height: Math.round(MH * mScale), shapes: masterShapes, style: { fillOpacity: 0.45 } }];
+const scenes = [{ id: "masterplan", title: TITLE, image: NO_COPY ? path.basename(MASTER) : `/scenes/${SLUG}/masterplan.webp`, width: Math.round(MW * mScale), height: Math.round(MH * mScale), shapes: masterShapes, style: { fillOpacity: 0.45 } }];
 // carried-over plots: a scene of that project whose image is the same picture as a phase's
 const carried = [];
 if (PLOTS_FROM) {
@@ -406,13 +419,13 @@ if (PLOTS_FROM) {
 }
 for (const im of phaseImages) {
   const id = sceneIdOf(im.name), out = path.join(sceneDir, `${im.name}${path.extname(im.file)}`);
-  copyFileSync(im.file, out);
+  if (!NO_COPY) copyFileSync(im.file, out);
   const toPct = (wp) => { const [x, y] = apply(im.toPx, wp); return [pct(x, im.w), pct(y, im.h)]; };
   const phase = phases.find((p) => p.name === im.name);
   // its facilities: by the spreadsheet's cluster, or lying inside the phase outline
   const mine = placed.filter((f) => f.cluster === im.name || (phase && inside(centroid(f.world), phase.world)));
   const shapes = mine.flatMap((f) => facilityShapes(f, toPct)).filter((s) => s.points.every(([x, y]) => x > -5 && y > -5 && x < 105 && y < 105));
-  const scene = { id, title: im.name, image: `/scenes/${SLUG}/${path.basename(out)}`, width: im.w, height: im.h, shapes };
+  const scene = { id, title: im.name, image: NO_COPY ? path.basename(im.file) : `/scenes/${SLUG}/${path.basename(out)}`, width: im.w, height: im.h, shapes };
   const bytes = readFileSync(im.file), same = carried.find((c) => c.bytes.equals(bytes));
   if (same) {
     const own = new Set(shapes.map((s) => s.id));
@@ -433,4 +446,4 @@ const project = {
 mkdirSync(path.dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify(project, null, 2) + "\n");
 rmSync(tmp, { recursive: true, force: true });
-log(`6/6 Saved "${TITLE}": ${scenes.length} scenes, ${placed.length} facilities in ${categories.length} types → ${path.relative(ROOT, OUT)}`);
+log(`6/6 Saved "${TITLE}": ${scenes.length} scenes, ${placed.length} facilities in ${categories.length} types${NO_COPY ? "" : ` → ${path.relative(ROOT, OUT)}`}`);
