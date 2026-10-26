@@ -1,5 +1,5 @@
-import { addProject, imageUrl, openedProject, storeImage } from "./browser-store";
-import type { Project } from "./types";
+import { addProject, editorStorage, imageUrl, openedProject, storeImage } from "./browser-store";
+import type { Category, Project, Shape } from "./types";
 import { blobUpload, DIRECT_BYTES } from "./upload";
 
 /**
@@ -9,6 +9,9 @@ import { blobUpload, DIRECT_BYTES } from "./upload";
  * runs scripts/import-facilities.mjs on everything and returns the project,
  * and the browser stores it with its images. `npm run dev` sends the files
  * as they are instead (components/editor/import-facilities.tsx).
+ *
+ * facilitiesForScene: the same, for one scene of the open project — the
+ * facilities lying on its image, placed by the image's world file.
  */
 export interface GisFiles {
   title: string;
@@ -168,4 +171,32 @@ export async function importInBrowser(files: GisFiles, onStep: (step: string) =>
   }
   const name = await addProject(project);
   return { name, title: project.title, log };
+}
+
+export type SceneFacilitiesResult = { shapes: Shape[]; categories: Category[]; log: string } | { error: string };
+
+/** The facilities on one scene's image: `world` is the world file that came with it, `size` its pixel size. */
+export async function facilitiesForScene(
+  files: { xlsx: File; pdf: File; world: File; size: { width: number; height: number } },
+  onStep: (step: string) => void,
+): Promise<SceneFacilitiesResult> {
+  const body = new FormData();
+  body.append("xlsx", files.xlsx);
+  body.append("world", files.world, files.world.name);
+  body.append("size", `${files.size.width}x${files.size.height}`);
+  if (editorStorage() === "browser") {
+    onStep("Reading the map PDF…");
+    const { page, words } = await readPdf(files.pdf);
+    const big = files.xlsx.size + files.pdf.size + page.size + words.length > DIRECT_BYTES;
+    if (big) onStep("Uploading the map…");
+    body.append("words", words);
+    body.append("pdf", big ? await blobUpload("import/map.pdf", files.pdf) : files.pdf);
+    body.append("page", big ? await blobUpload("import/page.png", page) : page);
+  } else body.append("pdf", files.pdf); // npm run dev: poppler reads it
+  onStep("Finding the facilities…");
+  const res = await fetch("/api/import-facilities", { method: "POST", body });
+  if (res.status === 504) return { error: "The site's time limit ran out — try the desktop version (npm run dev)" };
+  const data = (await res.json().catch(() => ({}))) as { shapes?: Shape[]; categories?: Category[]; log?: string; error?: string };
+  if (!res.ok || !data.shapes) return { error: data.error ?? `Failed (${res.status})` };
+  return { shapes: data.shapes, categories: data.categories ?? [], log: data.log ?? "" };
 }
