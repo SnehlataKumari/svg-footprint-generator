@@ -197,23 +197,6 @@ status, area…) live in Contentful as `unit` entries. The only link is the
    project — Save it too. With Contentful set up, **Save & publish to
    Contentful** also creates/updates + publishes one `unit` per row (the local
    JSON stays as a backup).
-4. **Images and PDFs** for a plot's card go into the same plot details JSON
-   (`images: [...]`, `documents: [{ title, url }]`, by hotspot ID) — two ways:
-   - **3 · Attach images and PDFs** in the same dialog: pick the files, each
-     named with its plot's ID (`MT01-V5-051.jpg`, `MT01-V5-051_2.webp`,
-     `MT01-V5-051 floor plan GF.pdf`). Images become the card's pictures (the
-     first one big, the rest as thumbnails), PDFs a button each, titled by the
-     rest of the name ("Floor plan GF"; nothing left: "Plot sheet"). In
-     `npm run dev` the files are saved in `public/plot-files/<plot>/`; in the
-     hosted editor, in the browser (in the backup too). Works without a
-     spreadsheet, and files already attached stay when details are uploaded
-     again.
-   - **A column of links** in the spreadsheet (`/plot-files/…` or `https://…`,
-     several per cell separated by `,` `;`): a column called *Images* / *Photo*
-     (or links to image files) → pictures; any other → documents titled by
-     the column (*Plot sheet*, *Floor plan*…).
-   Contentful doesn't get them (they aren't in its `unit` model); its details
-   are merged over the local ones and the files stay.
 
 Contentful is optional. To add it, put in `.env.local` (see `.example.env`;
 never committed): `CONTENTFUL_SPACE_ID`, `CONTENTFUL_ENVIRONMENT`,
