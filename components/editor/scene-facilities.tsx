@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { facilitiesForScene } from "@/lib/gis-import";
+import { facilitiesForScene, phaseOf } from "@/lib/gis-import";
 import type { Category, Scene, Shape } from "@/lib/types";
 import { BUTTON, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
 
@@ -17,9 +17,10 @@ interface Props {
 
 /**
  * "Facilities from GIS files" for the scene being edited: the facilities
- * spreadsheet + its GeoPDF map + the world file of this scene's image → every
- * facility on the image outlined, named, filled in and shown with an icon
- * (lib/gis-import.ts `facilitiesForScene`). Projects ▾ → Import from GIS files
+ * spreadsheet + its GeoPDF map → every facility on the image outlined, named,
+ * filled in and shown with an icon (lib/gis-import.ts `facilitiesForScene`).
+ * The scene is found on the map from its plots and phase name, or — exact,
+ * and for scenes without plots — from its image's world file (optional). Projects ▾ → Import from GIS files
  * builds a whole new project from the same files instead.
  */
 export function SceneFacilities({ scene, onClose, onAdd }: Props) {
@@ -42,9 +43,9 @@ export function SceneFacilities({ scene, onClose, onAdd }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await facilitiesForScene({ xlsx: xlsx!, pdf: pdf!, world: world!, size: { width: scene.width, height: scene.height } }, setStep);
+      const result = await facilitiesForScene({ xlsx: xlsx!, pdf: pdf!, world }, scene, setStep);
       if ("error" in result) return setError(result.error);
-      if (!result.shapes.length) return setError("None of the facilities lie on this image — is it the world file of this scene's image?");
+      if (!result.shapes.length) return setError(world ? "None of the facilities lie on this image — is it the world file of this scene's image?" : "None of the map's facilities lie on this scene.");
       onAdd(result.shapes, result.categories, result.log.trim().split("\n").pop() ?? "");
     } catch (e) {
       setError((e as Error).message);
@@ -54,7 +55,14 @@ export function SceneFacilities({ scene, onClose, onAdd }: Props) {
   };
 
   const notWorld = !!world && !WORLD_FILE.test(world.name);
-  const missing = [!xlsx && "the spreadsheet", !pdf && "the map PDF", (!world || notWorld) && "the world file"].filter(Boolean);
+  // without a world file: the scene's plots are lined up with the map's, in the phase its name says
+  const plots = scene.shapes.filter((s) => s.kind === "polygon").length, phase = phaseOf(scene);
+  const placeable = !!world || (plots >= 10 && !!phase);
+  const missing = [
+    !xlsx && "the spreadsheet",
+    !pdf && "the map PDF",
+    (notWorld || !placeable) && (plots < 10 ? "the world file (or generate this scene's plots first)" : "the world file (or name the scene like its phase, e.g. MT01)"),
+  ].filter(Boolean);
 
   const fileRow = (label: string, hint: string, accept: string | undefined, file: File | null, set: (f: File | null) => void, problem?: string) => (
     <label className="block space-y-1">
@@ -83,8 +91,10 @@ export function SceneFacilities({ scene, onClose, onAdd }: Props) {
         {fileRow("Facilities spreadsheet", "Excel (.xlsx): one row per facility — plot ID, type, cluster, area…", ".xlsx", xlsx, setXlsx)}
         {fileRow("Facilities map", "PDF exported from ArcGIS / QGIS as a GeoPDF, each facility labelled with its plot ID", ".pdf,application/pdf", pdf, setPdf)}
         {fileRow(
-          "World file of this scene's image",
-          "The small file that came with the image (e.g. MT11.wpw next to MT11.webp) — it says where the image lies on the map",
+          "World file of this scene's image (optional)",
+          plots >= 10 && phase
+            ? `Not needed: the scene's ${plots} plots are lined up with the map's ${phase} plots. The small .wpw / .pgw file that came with the image (e.g. ${phase}.wpw) places it exactly instead.`
+            : "The small file that came with the image (e.g. MT11.wpw next to MT11.webp) — it says where the image lies on the map. Without it the scene needs its plots, and a phase name like MT01.",
           undefined,
           world,
           setWorld,

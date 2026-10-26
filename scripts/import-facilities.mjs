@@ -35,6 +35,9 @@
  *   --into <world file> --size <width>x<height> --out result.json
  * instead of --masterplan / --phases: the facilities lying on that image,
  * placed by its world file, as { shapes, categories } — no new project.
+ * Without a world file: --fit scene.json ({ phase, width, height, plots }) —
+ * the scene's own plot outlines are lined up with the map's plot lines inside
+ * that phase's outline (a scale and a shift: both are north-up).
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
@@ -50,8 +53,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const need = (name) => opt(name) ?? (console.error(`Missing ${name}`), process.exit(1));
-const INTO = opt("--into"), SIZE = opt("--size")?.split("x").map(Number);
-const XLSX = need("--xlsx"), PDF = need("--pdf"), MASTER = INTO ? null : need("--masterplan"), PHASES = INTO ? null : need("--phases");
+const INTO = opt("--into"), SIZE = opt("--size")?.split("x").map(Number), FIT = opt("--fit");
+const ONE = INTO || FIT; // one scene of an open project
+const XLSX = need("--xlsx"), PDF = need("--pdf"), MASTER = ONE ? null : need("--masterplan"), PHASES = ONE ? null : need("--phases");
 const TITLE = opt("--title") ?? "Facilities";
 const SLUG = opt("--slug") ?? (TITLE.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "facilities"); // images go to public/scenes/<slug>/
 const OUT = path.resolve(opt("--out") ?? path.join(ROOT, "data", "projects", `${SLUG}.json`));
@@ -339,9 +343,89 @@ for (const w of words.filter((wd) => /^[A-Z]{1,4}\d{2}$/.test(wd.text))) {
   const pix = flood([seed], (j) => !thick[j], PN / 4);
   if (!pix) { log(`    phase ${w.text}: its outline isn't closed — skipped`); continue; }
   const loop = outlineOf(pix, 6);
-  if (loop) phases.push({ name: w.text, world: loop.map(pxToWorld), label: [cx, cy] });
+  if (loop) phases.push({ name: w.text, world: loop.map(pxToWorld), px: loop, label: [cx, cy] });
 }
 log(`    ${phases.length} phase outlines: ${phases.map((p) => p.name).join(", ")}`);
+
+// ---------------------------------------------------------------- one scene, no world file
+if (FIT) {
+  const { phase: name, width: SW, height: SH, plots } = JSON.parse(readFileSync(FIT, "utf8"));
+  const ph = phases.find((p) => p.name === name);
+  if (!ph) throw new Error(`The map has no phase “${name}” (it shows ${phases.map((p) => p.name).join(", ")}) — name the scene like its phase, or use its world file`);
+  if (plots.length < 10) throw new Error("The scene needs its plots first (Generate → Numbered plots) to be lined up with the map — or use its world file");
+  // the map's thin plot lines around the phase, at half size, as distances to the nearest line
+  const D = 2, xs = ph.px.map((q) => q[0]), ys = ph.px.map((q) => q[1]);
+  const mx = (Math.max(...xs) - Math.min(...xs)) * 0.12, my = (Math.max(...ys) - Math.min(...ys)) * 0.12;
+  const X0 = Math.max(0, Math.min(...xs) - mx), Y0 = Math.max(0, Math.min(...ys) - my);
+  const CW = Math.ceil((Math.min(PW, Math.max(...xs) + mx) - X0) / D), CH = Math.ceil((Math.min(PH, Math.max(...ys) + my) - Y0) / D);
+  const CAP = 12, dist = new Float32Array(CW * CH).fill(CAP);
+  for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) {
+    const [r, g, b] = rgbAt(Math.round(Y0 + y * D) * PW + Math.round(X0 + x * D));
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 12 && r >= 170 && r <= 236) dist[y * CW + x] = 0;
+  }
+  for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { // two-pass chamfer
+    const i = y * CW + x;
+    if (x) dist[i] = Math.min(dist[i], dist[i - 1] + 1);
+    if (y) dist[i] = Math.min(dist[i], dist[i - CW] + 1, x ? dist[i - CW - 1] + 1.4 : CAP, x < CW - 1 ? dist[i - CW + 1] + 1.4 : CAP);
+  }
+  for (let y = CH - 1; y >= 0; y--) for (let x = CW - 1; x >= 0; x--) {
+    const i = y * CW + x;
+    if (x < CW - 1) dist[i] = Math.min(dist[i], dist[i + 1] + 1);
+    if (y < CH - 1) dist[i] = Math.min(dist[i], dist[i + CW] + 1, x < CW - 1 ? dist[i + CW + 1] + 1.4 : CAP, x ? dist[i + CW - 1] + 1.4 : CAP);
+  }
+  // points along the scene's plot outlines (scene px)
+  const pts = [];
+  for (const P of plots) for (let i = 0; i < P.length; i++) {
+    const [ax, ay] = [(P[i][0] / 100) * SW, (P[i][1] / 100) * SH], [bx, by] = [(P[(i + 1) % P.length][0] / 100) * SW, (P[(i + 1) % P.length][1] / 100) * SH];
+    const n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / 6));
+    for (let k = 0; k < n; k++) pts.push([ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n]);
+  }
+  /** Mean distance (crop px) from the plot outlines, placed by page px = s · scene px + (c, f), to the map's lines. */
+  const score = (s, c, f, every = 1) => {
+    let sum = 0, n = 0;
+    for (let i = 0; i < pts.length; i += every, n++) {
+      const x = Math.round((s * pts[i][0] + c - X0) / D), y = Math.round((s * pts[i][1] + f - Y0) / D);
+      sum += x >= 0 && y >= 0 && x < CW && y < CH ? dist[y * CW + x] : CAP;
+    }
+    return sum / n;
+  };
+  // start: the plots' extent inside the phase outline's, then search scale and shift, coarse to fine
+  const px = pts.map((q) => q[0]), py = pts.map((q) => q[1]);
+  const [sx0, sx1, sy0, sy1] = [Math.min(...px), Math.max(...px), Math.min(...py), Math.max(...py)];
+  const pw = Math.max(...xs) - Math.min(...xs), phh = Math.max(...ys) - Math.min(...ys);
+  const s0 = ((pw / (sx1 - sx0)) + (phh / (sy1 - sy0))) / 2 * 0.92;
+  const centre = (s) => [(Math.min(...xs) + Math.max(...xs)) / 2 - (s * (sx0 + sx1)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2 - (s * (sy0 + sy1)) / 2];
+  let best = { e: Infinity };
+  const every = Math.max(1, Math.floor(pts.length / 800));
+  for (let s = s0 * 0.75; s <= s0 * 1.25; s *= 1.015) {
+    const [c0, f0] = centre(s);
+    for (let dc = -0.12 * pw; dc <= 0.12 * pw; dc += 8) for (let df = -0.12 * phh; df <= 0.12 * phh; df += 8) {
+      const e = score(s, c0 + dc, f0 + df, every);
+      if (e < best.e) best = { e, s, c: c0 + dc, f: f0 + df };
+    }
+  }
+  for (const [ds, dd] of [[0.006, 3], [0.0015, 1], [0.0004, 0.5]]) {
+    const b = best;
+    for (let k = -4; k <= 4; k++) for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+      const s = b.s * (1 + k * ds), c = b.c + i * dd, f = b.f + j * dd, e = score(s, c, f);
+      if (e < best.e) best = { e, s, c, f };
+    }
+  }
+  const near = pts.filter((q) => { const x = Math.round((best.s * q[0] + best.c - X0) / D), y = Math.round((best.s * q[1] + best.f - Y0) / D); return x >= 0 && y >= 0 && x < CW && y < CH && dist[y * CW + x] <= 1.5; }).length / pts.length;
+  log(`    ${name}: the scene's ${plots.length} plots lined up with the map — ${Math.round(near * 100)}% of their outlines on its plot lines`);
+  if (near < 0.5) throw new Error(`The scene's plots don't line up with the map's ${name} plots (${Math.round(near * 100)}% on its lines) — use the scene's world file instead`);
+  // world → scene %: world → page px (pxToWorld undone) → scene px
+  const worldToPage = invert(pageToWorld);
+  const toPct = (wp) => { const [u, v] = apply(worldToPage, wp); return [pct((u * K - 0.5 - best.c) / best.s, SW), pct((v * K - 0.5 - best.f) / best.s, SH)]; };
+  const own = placed.some((f) => f.cluster === name);
+  const onImage = (sh) => sh.points.every(([x, y]) => x > -5 && y > -5 && x < 105 && y < 105);
+  const shapes = placed.filter((f) => !own || f.cluster === name).map((f) => facilityShapes(f, toPct)).filter(([outline]) => onImage(outline)).flat();
+  const used = new Set(shapes.map((sh) => sh.category));
+  writeFileSync(OUT, JSON.stringify({ shapes, categories: categories.filter((c) => used.has(c.id)) }));
+  rmSync(tmp, { recursive: true, force: true });
+  log(`${shapes.length / 2} of ${placed.length} facilities lie on this image${own ? ` (cluster ${name})` : ""}`);
+  process.exit(0);
+}
 
 // ---------------------------------------------------------------- 4. phase images (world files)
 const worldFileOf = (img) => {

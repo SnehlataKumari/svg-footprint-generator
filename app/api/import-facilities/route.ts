@@ -16,9 +16,10 @@ import { blobUrlsIn, runScript, uploadedBytes } from "@/lib/run-script";
  *   Vercel Blob URLs. Nothing is saved: the project goes back to the browser,
  *   which stores it with the images it already has.
  * - One scene of the open project (`world` = its image's world file, `size` =
- *   the image's pixel size): only the facilities on that image come back, as
- *   { shapes, categories } for the editor to add (lib/gis-import.ts). Nothing
- *   is saved, in either mode.
+ *   the image's pixel size; or `fit` = { phase, width, height, plots }: its
+ *   plots, lined up with the map's): only the facilities on that image come
+ *   back, as { shapes, categories } for the editor to add (lib/gis-import.ts).
+ *   Nothing is saved, in any mode.
  */
 const PROJECTS = path.join(process.cwd(), "data", "projects");
 const slug = (s: string) =>
@@ -45,10 +46,11 @@ export async function POST(request: Request) {
   const names = form.getAll("phaseNames").map(String); // hosted: a Blob URL has no file name of its own
   const nameOf = (v: FormDataEntryValue, i: number) => (v instanceof File ? v.name : (names[i] ?? ""));
   const dir = await mkdtemp(path.join(tmpdir(), "import-"));
-  const into = form.get("world");
+  const into = form.get("world"), fit = form.get("fit");
+  const one = into || fit; // one scene of the open project
   try {
-    if (!form.get("xlsx") || !form.get("pdf") || (!into && (!form.get("masterplan") || !files("phases").length))) {
-      const all = into ? "the spreadsheet and the map PDF" : "all four: the spreadsheet, the map PDF, the masterplan image and the phase images";
+    if (!form.get("xlsx") || !form.get("pdf") || (!one && (!form.get("masterplan") || !files("phases").length))) {
+      const all = one ? "the spreadsheet and the map PDF" : "all four: the spreadsheet, the map PDF, the masterplan image and the phase images";
       return Response.json({ error: `Add ${all}` }, { status: 400 });
     }
     const save = async (value: FormDataEntryValue | null, name: string, what: string, folder = dir) => {
@@ -64,6 +66,9 @@ export async function POST(request: Request) {
     if (into) {
       // the world file keeps its name: MT11.wpw → the facilities of cluster MT11
       args.push("--into", await save(into, into instanceof File ? into.name : "scene.wld", "The world file"), "--size", String(form.get("size")));
+    } else if (fit) {
+      await writeFile(path.join(dir, "fit.json"), String(fit));
+      args.push("--fit", path.join(dir, "fit.json"));
     } else {
       const phaseDir = path.join(dir, "phases");
       await mkdir(phaseDir);
@@ -78,7 +83,7 @@ export async function POST(request: Request) {
       await writeFile(path.join(dir, "words.json"), String(form.get("words") ?? ""));
       args.push("--words", path.join(dir, "words.json"));
     }
-    if (into) args.push("--out", out);
+    if (one) args.push("--out", out);
     else if (hosted) args.push("--no-copy", "--out", out);
     else {
       // a unique project name (never overwrites a waiting project)
@@ -93,7 +98,7 @@ export async function POST(request: Request) {
       const last = log.trim().split("\n").filter((l) => /error|missing|no geo/i.test(l)).pop() ?? log.trim().split("\n").pop();
       return Response.json({ error: last || "The import stopped", log }, { status: 500 });
     }
-    if (into) return Response.json({ ok: true, log, ...JSON.parse(await readFile(out, "utf8")) });
+    if (one) return Response.json({ ok: true, log, ...JSON.parse(await readFile(out, "utf8")) });
     if (hosted) return Response.json({ ok: true, title, log, project: JSON.parse(await readFile(out, "utf8")) });
     return Response.json({ ok: true, name, title, log });
   } catch (e) {
