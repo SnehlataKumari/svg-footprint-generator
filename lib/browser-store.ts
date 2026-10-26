@@ -74,7 +74,12 @@ export async function storeImage(file: Blob, name: string): Promise<string> {
   return src;
 }
 
-const imagesOf = (p: Project) => p.scenes.flatMap((s) => [s.image, s.trace?.image ?? ""]).filter((src) => src.startsWith(LOCAL_PREFIX));
+/** Every browser-stored file the project uses: scene and reference images, and the plot details' attached images / documents. */
+const imagesOf = (p: Project) =>
+  [
+    ...p.scenes.flatMap((s) => [s.image, s.trace?.image ?? ""]),
+    ...Object.values(p.details ?? {}).flatMap((d) => [...(d.images ?? []), ...(d.documents ?? []).map((a) => a.url)]),
+  ].filter((src) => src.startsWith(LOCAL_PREFIX));
 
 /** Makes the project's stored images loadable (call before showing it). */
 export async function loadImages(p: Project) {
