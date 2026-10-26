@@ -38,9 +38,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "Send the scene's images with the request" }, { status: 400 });
   }
   const form = uploaded ? await request.formData() : null;
-  const { mode, scene } = form
-    ? { mode: String(form.get("mode")) as GenerateMode, scene: JSON.parse(String(form.get("scene"))) as Scene }
-    : ((await request.json()) as { mode: GenerateMode; scene: Scene });
+  const { mode, scene, prefix } = form
+    ? { mode: String(form.get("mode")) as GenerateMode, scene: JSON.parse(String(form.get("scene"))) as Scene, prefix: String(form.get("prefix") ?? "") }
+    : ((await request.json()) as { mode: GenerateMode; scene: Scene; prefix?: string });
   const blobUrls = form ? blobUrlsIn(form) : [];
   if (!(mode in SCRIPTS)) return Response.json({ error: `Unknown mode "${mode}"` }, { status: 400 });
   if (!scene?.trace) return Response.json({ error: "This scene has no reference image" }, { status: 400 });
@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     const sceneFile = path.join(dir, "scene.json");
     const out = path.join(dir, "result.json");
     const args = ["--scene-file", sceneFile, "--out", out];
+    if (mode === "plots" && prefix?.trim()) args.push("--prefix", prefix.trim()); // plot names: your prefix instead of the labels'
     if (form) {
       await writeFile(path.join(dir, "image"), await uploadedBytes(form.get("image")));
       await writeFile(path.join(dir, "reference"), await uploadedBytes(form.get("reference")));

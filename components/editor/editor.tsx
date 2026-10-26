@@ -118,6 +118,7 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
   const [facilitiesOpen, setFacilitiesOpen] = useState(false);
   /** The kinds to generate — several at once is fine (areas + amenity icons…). */
   const [generateModes, setGenerateModes] = useState<GenerateMode[]>(["areas"]);
+  const [plotPrefix, setPlotPrefix] = useState("");
   /** What the orange results came from, for the wording ("11 areas", "42 shapes"). */
   const [generatedNoun, setGeneratedNoun] = useState<string>("plots");
   const [generating, setGenerating] = useState<GenerateMode | null>(null);
@@ -196,6 +197,36 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     if (scene.shapes.some((s) => s.id === newId)) return say(`"${newId}" is already used in this scene`, true);
     updateShapes([oldId], { id: newId });
     setSelectedIds([newId]);
+  };
+
+  /** The selected shapes' ids "<from>…" → "<to>…" (labels with the id in them too, and their plot details): one undo step. */
+  const replacePrefix = (from: string, to: string) => {
+    if (!scene || !from || from === to) return;
+    const renamed = new Map(scene.shapes.filter((s) => selectedIds.includes(s.id) && s.id.startsWith(from)).map((s) => [s.id, to + s.id.slice(from.length)]));
+    if (!renamed.size) return say(`None of the selected ids start with "${from}"`, true);
+    const others = new Set(scene.shapes.filter((s) => !renamed.has(s.id)).map((s) => s.id));
+    const fresh = [...renamed.values()];
+    const clash = fresh.find((id, i) => !id || others.has(id) || fresh.indexOf(id) !== i);
+    if (clash !== undefined) return say(clash ? `"${clash}" is already used in this scene` : "An id can't be empty", true);
+    setProject((p) => {
+      const details = p.details && { ...p.details };
+      for (const [old, id] of renamed) {
+        if (!details?.[old] || details[id]) continue;
+        details[id] = details[old];
+        delete details[old];
+      }
+      return {
+        ...p,
+        ...(details ? { details } : {}),
+        scenes: p.scenes.map((sc) =>
+          sc.id !== scene.id
+            ? sc
+            : { ...sc, shapes: sc.shapes.map((s) => (renamed.has(s.id) ? { ...s, id: renamed.get(s.id)!, label: s.label.split(s.id).join(renamed.get(s.id)!) } : s)) },
+        ),
+      };
+    });
+    setSelectedIds((ids) => ids.map((id) => renamed.get(id) ?? id));
+    say(`Renamed ${renamed.size} ${renamed.size === 1 ? "shape" : "shapes"}: ${from}… → ${to}… — Save to keep them. Ctrl+Z undoes.`);
   };
 
   const select = useCallback((ids: string[], mode: "replace" | "toggle" | "add") => {
@@ -351,7 +382,7 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
     try {
       for (const mode of generateModes) {
         setGenerating(mode);
-        const part = await generateFromReference(mode, current);
+        const part = await generateFromReference(mode, current, plotPrefix);
         if ("error" in part) {
           failed.push(`${GENERATE_NOUN[mode]}: ${part.error}`);
           continue;
@@ -697,6 +728,8 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
       <GeneratePanel
         modes={generateModes}
         onModes={setGenerateModes}
+        prefix={plotPrefix}
+        onPrefix={setPlotPrefix}
         busy={generating}
         unplaced={plotting.transform.every((v, i) => v === IDENTITY[i]) && !(plotting.points ?? []).length}
         onGenerate={runGenerate}
@@ -1106,6 +1139,7 @@ export function Editor({ initialProject, initialSceneId }: { initialProject: Pro
           onChange={(patch) => updateShapes(selectedIds, patch)}
           onStyle={(patch) => updateShapes(selectedIds, (sh) => ({ style: { ...sh.style, ...patch } }))}
           onRename={(id) => selectedShapes.length === 1 && renameShape(selectedShapes[0].id, id)}
+          onReplacePrefix={replacePrefix}
           onDelete={deleteSelected}
           onClearSelection={() => setSelectedIds([])}
         />

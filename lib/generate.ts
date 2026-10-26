@@ -21,14 +21,15 @@ export type GenerateResult =
   | { shapes: Shape[]; categories?: Category[]; transform?: Affine; log: string }
   | { error: string; log?: string };
 
-export async function generateFromReference(mode: GenerateMode, scene: Scene): Promise<GenerateResult> {
+/** `prefix` (plots): name them "<prefix>-V<type>-<nnn>" whatever prefix their labels show; empty = as on the labels. */
+export async function generateFromReference(mode: GenerateMode, scene: Scene, prefix = ""): Promise<GenerateResult> {
   const res =
     editorStorage() === "browser"
-      ? await sendWithImages(mode, scene).catch((e: Error) => ({ error: e.message }))
+      ? await sendWithImages(mode, scene, prefix).catch((e: Error) => ({ error: e.message }))
       : await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode, scene: { ...scene, shapes: [] } }),
+          body: JSON.stringify({ mode, scene: { ...scene, shapes: [] }, prefix }),
         });
   if (!(res instanceof Response)) return res;
   if (res.status === 504) return { error: "The site's time limit ran out — try a smaller reference image, or the desktop version (npm run dev)" };
@@ -36,7 +37,7 @@ export async function generateFromReference(mode: GenerateMode, scene: Scene): P
 }
 
 /** Hosted editor: the images live in this browser, so they go with the request. */
-async function sendWithImages(mode: GenerateMode, scene: Scene): Promise<Response> {
+async function sendWithImages(mode: GenerateMode, scene: Scene, prefix: string): Promise<Response> {
   const read = async (src: string) => {
     const res = await fetch(imageUrl(src)).catch(() => null);
     if (!res?.ok) throw new Error(`Couldn't read the image ${src}`);
@@ -47,6 +48,7 @@ async function sendWithImages(mode: GenerateMode, scene: Scene): Promise<Respons
   const send = (name: string, file: Blob) => (viaBlob ? blobUpload(`generate/${name}`, file) : file);
   const body = new FormData();
   body.append("mode", mode);
+  body.append("prefix", prefix);
   body.append("scene", JSON.stringify({ ...scene, shapes: [] }));
   body.append("image", await send("image", image));
   body.append("reference", await send("reference", reference));

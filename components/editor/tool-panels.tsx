@@ -375,6 +375,9 @@ interface GenerateProps {
   /** The kinds to generate; several run one after the other into one preview. */
   modes: GenerateMode[];
   onModes: (modes: GenerateMode[]) => void;
+  /** Plots: the prefix their names get instead of the one on the labels ("" = as on the labels). */
+  prefix: string;
+  onPrefix: (prefix: string) => void;
   /** What's running ("areas" / "plots"), or null. */
   busy: GenerateMode | null;
   /** The reference hasn't been placed yet (still stretched over the image). */
@@ -423,6 +426,27 @@ export function GeneratePanel(p: GenerateProps) {
         <span className={LABEL}>The reference shows (tick all that apply)</span>
         {option("areas", "Coloured areas", "your picture with neighbourhoods / phases tinted in colour and their names written on them (a sales map).")}
         {option("plots", "Numbered plots", "your picture with plot lines drawn on it and a label in a white box on each plot (e.g. MT12-V5-001).")}
+        {on("plots") && (
+          <label className="ml-6 block space-y-1">
+            <span className={LABEL}>Plot ID prefix (optional)</span>
+            <input
+              className={`${INPUT} font-mono`}
+              value={p.prefix}
+              onChange={(e) => p.onPrefix(e.target.value)}
+              placeholder="as on the labels, e.g. MT12"
+              disabled={!!p.busy}
+            />
+            <span className="block text-neutral-500">
+              {p.prefix.trim() ? (
+                <>
+                  Plots are named <span className="font-mono">{p.prefix.trim().replace(/-+$/, "")}-V5-001</span>… whatever the labels say before “-V”.
+                </>
+              ) : (
+                "Leave empty to use the prefix printed on the labels."
+              )}
+            </span>
+          </label>
+        )}
         {option("amenities", "Amenity icons", "small round badges marking amenities (park, cycling, dining…). Each becomes a pin at the same spot, grouped by type; give each type your own icon under Categories.")}
         {option("lines", "Coloured lines", "your picture with routes drawn on it in bright colours, solid or dashed (metro / bus lines, roads). Each becomes a line in the same colour and dash.")}
       </div>

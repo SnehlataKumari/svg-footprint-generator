@@ -140,7 +140,9 @@ Once the reference is placed (**Place reference… → Auto-align**), click
   coloured like the reference and named from the text inside it (areas whose
   name can't be read are called *Area N* — rename them). ~20 s.
 - **Numbered plots** — your picture with plot lines drawn on it and a label in
-  a white box on each plot; see the script below. 1–3 min.
+  a white box on each plot; see the script below. 1–3 min. The phase prefix
+  (`MT11`, `MT12`…) is read from the labels; type a **Plot ID prefix** to name
+  them `<prefix>-V<type>-<nnn>` instead (e.g. `ALM-MT11`).
 - **Amenity icons** — small round badges marking amenities (park, cycling,
   dining…). A *pin* at each badge, grouped by type (same symbol + colour): one
   category per type, holding the type's icon — cut from the reference to start
@@ -320,6 +322,10 @@ Ids can be **anything**: any prefix, any suffix, or a list.
   Set *Start* and *Step* (e.g. step 2 for odd numbers only).
 - **Paste list** — ids one per line (or comma-separated), e.g. a column copied
   from the sales Excel. Used in order.
+- **Replace id prefix…** (right panel, with shapes selected) — swaps the start
+  of every selected id and keeps the rest: `MT12-` → `MT11-` turns
+  MT12-V5-001 into MT11-V5-001. Labels containing the id follow; an id already
+  used in the scene stops it. One undo step.
 
 Then either:
 
