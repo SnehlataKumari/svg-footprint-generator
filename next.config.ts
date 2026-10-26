@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
   // what they import: ship them, their packages and the OCR data with the route.
   outputFileTracingIncludes: {
     "/api/generate": ["./scripts/**/*.mjs", "./eng.traineddata", ...packageFiles("sharp"), ...packageFiles("tesseract.js")],
+    "/api/import-facilities": ["./scripts/**/*.mjs", ...packageFiles("sharp")],
   },
 };
 

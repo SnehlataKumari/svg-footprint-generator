@@ -104,18 +104,31 @@ export async function openedProject(): Promise<Project> {
   return p;
 }
 
+/** A name no stored project has yet, from the title. */
+async function freeName(title: string) {
+  const taken = new Set(await keys("projects"));
+  let n = slug(title);
+  for (let i = 2; taken.has(n); i++) n = `${slug(title)}-${i}`;
+  return n;
+}
+
 async function currentName(p: Project) {
   const name = await get<string>("meta", "current");
   if (name) return name;
-  const taken = new Set(await keys("projects"));
-  let n = slug(p.title);
-  for (let i = 2; taken.has(n); i++) n = `${slug(p.title)}-${i}`;
+  const n = await freeName(p.title);
   await put("meta", "current", n);
   return n;
 }
 
 export async function saveProject(p: Project) {
   await put("projects", await currentName(p), { project: p, updated: new Date().toISOString() });
+}
+
+/** Stores another project (e.g. imported) without opening it; returns its name for openProject(). */
+export async function addProject(p: Project): Promise<string> {
+  const name = await freeName(p.title);
+  await put("projects", name, { project: p, updated: new Date().toISOString() });
+  return name;
 }
 
 /** Every project in this browser except the open one. */

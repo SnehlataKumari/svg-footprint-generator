@@ -100,7 +100,6 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
             </p>
           </form>
 
-          {!inBrowser && (
           <div className="space-y-1">
             <span className={LABEL}>From GIS files</span>
             <button type="button" className={`${BUTTON} w-full`} disabled={busy} onClick={() => setImporting(true)}>
@@ -108,7 +107,6 @@ export function ProjectSwitcher({ title, dirty, onSave, onLeave, onStatus }: Pro
             </button>
             <p className="text-xs text-neutral-500">Facilities spreadsheet + map PDF + masterplan + phase images → a ready project.</p>
           </div>
-          )}
 
           <div className="space-y-1">
             <span className={LABEL}>Other projects</span>
