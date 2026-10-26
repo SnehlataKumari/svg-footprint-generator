@@ -1,4 +1,4 @@
-import type { Category, Project, Shape } from "./types";
+import type { Attachment, Category, Project, Shape } from "./types";
 
 /**
  * Plot details — the information about each plot (typology, status, area…),
@@ -21,6 +21,11 @@ export interface UnitDetails {
   gfa?: number;
   parking?: number;
   confirmed?: boolean;
+  /** Images for the plot's card (the first is the big one): paths under /public or URLs.
+   *  Kept with the details (local JSON / project), not sent to Contentful. */
+  images?: string[];
+  /** Documents (plot sheet, floor plans…) — a button each on the plot's card. Not sent to Contentful. */
+  documents?: Attachment[];
   /** Columns the Contentful model doesn't have: kept locally and shown on the
    *  details card, not sent to Contentful. */
   extra?: Record<string, string>;
@@ -65,11 +70,30 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 /** GIS / spreadsheet bookkeeping columns: not plot details, never shown. */
 const IGNORED = new Set(["sno", "no", "objectid", "fid", "oid", "shape", "shapelength", "shapearea", "shapeleng", "globalid"]);
 const EMPTY = /^(|<null>|null|n\/a|na|-|—)$/i;
+/** Columns of links whose files are images for the card (any other column of links = documents, titled by the column). */
+const IMAGE_COLUMNS = new Set(["image", "images", "photo", "photos", "picture", "gallery", "render", "renders", "facadeimage", "facadeimageoverride"]);
+const LINK = /^(https?:\/\/|\/)\S+$/i;
+export const IMAGE_FILE = /\.(png|jpe?g|webp|avif|gif|svg)(\?.*)?$/i;
+
+/** a + b without repeats (same URL). */
+export function mergeAttachments<T extends string | Attachment>(a: T[] = [], b: T[] = []): T[] {
+  const url = (x: T) => (typeof x === "string" ? x : x.url);
+  return [...a, ...b.filter((x) => !a.some((y) => url(y) === url(x)))];
+}
 
 /** Which field each spreadsheet column is (null = an extra column). */
 export function mapHeaders(headers: string[]): (FieldDef | null)[] {
   return headers.map((h) => UNIT_FIELDS.find((f) => f.aliases.includes(norm(h))) ?? null);
 }
+
+/** Two versions of a plot's details: `b`'s fields win; images and documents add up. */
+export const mergeUnit = (a: UnitDetails | undefined, b: UnitDetails): UnitDetails => {
+  const images = mergeAttachments(a?.images, b.images), documents = mergeAttachments(a?.documents, b.documents);
+  const out: UnitDetails = { ...a, ...b, images, documents };
+  if (!images.length) delete out.images;
+  if (!documents.length) delete out.documents;
+  return out;
+};
 
 /** One spreadsheet row → details + what's wrong with it. */
 /**
@@ -88,7 +112,18 @@ export function parseRow(headers: string[], cells: string[]): { details: UnitDet
   fields.forEach((f, i) => {
     const raw = (cells[i] ?? "").trim();
     if (!f) {
-      if (raw && !EMPTY.test(raw) && headers[i]?.trim() && !IGNORED.has(norm(headers[i]))) extra[headers[i].trim()] = raw.replace(/^(-?\d+)\.0+$/, "$1");
+      if (!raw || EMPTY.test(raw) || !headers[i]?.trim() || IGNORED.has(norm(headers[i]))) return;
+      // a column of links (one or more per cell): images for the card, or documents titled by the column
+      const links = raw.split(/[\s,;|]+/).filter(Boolean);
+      if (links.every((l) => LINK.test(l))) {
+        const title = headers[i].trim();
+        for (const [k, url] of links.entries()) {
+          if (IMAGE_COLUMNS.has(norm(title)) || IMAGE_FILE.test(url)) details.images = mergeAttachments(details.images, [url]);
+          else details.documents = mergeAttachments(details.documents, [{ title: links.length > 1 ? `${title} ${k + 1}` : title, url }]);
+        }
+        return;
+      }
+      extra[headers[i].trim()] = raw.replace(/^(-?\d+)\.0+$/, "$1");
       return;
     }
     if (EMPTY.test(raw)) return;
@@ -159,6 +194,8 @@ export function applyDetails(project: Project, details: Record<string, UnitDetai
       label: s.label && s.label !== s.id ? s.label : (d.plotLabel ?? s.label),
       info: { ...(s.info ?? {}), ...detailsInfo(d) },
       ...(cat ? { category: cat.id } : {}),
+      ...(d.images?.length ? { images: mergeAttachments(s.images, d.images) } : {}),
+      ...(d.documents?.length ? { documents: mergeAttachments(s.documents, d.documents) } : {}),
     };
   };
   return { ...project, scenes: project.scenes.map((sc) => ({ ...sc, shapes: sc.shapes.map(withDetails) })) };

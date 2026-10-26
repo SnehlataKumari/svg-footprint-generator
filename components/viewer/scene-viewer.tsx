@@ -104,7 +104,7 @@ export function SceneViewer({ project, sceneId, onNavigate, onPrefetch, globalKe
   };
 
   const activate = (shape: Shape) => {
-    const hasDetails = !!(shape.description || shape.image || shape.url || Object.keys(shape.info ?? {}).length);
+    const hasDetails = !!(shape.description || shape.image || shape.images?.length || shape.documents?.length || shape.url || Object.keys(shape.info ?? {}).length);
     if (hasDetails) setSelected(shape);
     else if (shape.link) enter(shape);
   };

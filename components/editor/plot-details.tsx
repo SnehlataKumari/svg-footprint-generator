@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { editorStorage } from "@/lib/browser-store";
-import { STATUS_COLORS, templateCsv, type UnitDetails } from "@/lib/plot-details";
-import type { Project, Scene } from "@/lib/types";
+import { editorStorage, storeImage } from "@/lib/browser-store";
+import { IMAGE_FILE, mergeUnit, STATUS_COLORS, templateCsv, type UnitDetails } from "@/lib/plot-details";
+import type { Attachment, Project, Scene } from "@/lib/types";
 import { BUTTON, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
 
 interface Props {
@@ -16,6 +16,33 @@ interface Props {
 
 type Row = { details: UnitDetails; errors: string[]; warnings?: string[] };
 type Match = { row: Row; shapeId?: string; by?: "hotspotId" | "plotLabel" };
+
+const ATTACHABLE = /\.(png|jpe?g|webp|avif|gif|svg|pdf)$/i;
+const lower = (s: string) => s.toLowerCase();
+
+/**
+ * The plot a file is for: the longest plot ID / label in its name, standing on
+ * its own ("MT01-V5-051 floor plan.pdf", "mt01-v5-051_1.jpg" → MT01-V5-051 —
+ * not MT01-V5-05). `ids`: lower-case ID or label → hotspot ID.
+ */
+function plotOfFile(name: string, ids: Map<string, string>): { hotspotId: string; rest: string } | null {
+  const n = lower(name.replace(/\.[^.]+$/, ""));
+  let best: { key: string; at: number } | null = null;
+  for (const key of ids.keys()) {
+    for (let at = n.indexOf(key); at >= 0; at = n.indexOf(key, at + 1)) {
+      const before = n[at - 1], after = n[at + key.length];
+      if ((before && /[a-z0-9]/.test(before)) || (after && /[a-z0-9]/.test(after))) continue;
+      if (!best || key.length > best.key.length) best = { key, at };
+    }
+  }
+  if (!best) return null;
+  const base = name.replace(/\.[^.]+$/, "");
+  const rest = (base.slice(0, best.at) + " " + base.slice(best.at + best.key.length)).replace(/[_\-–.]+/g, " ").replace(/\s+/g, " ").trim();
+  return { hotspotId: ids.get(best.key)!, rest };
+}
+
+/** A document's title from what's left of its name ("floor plan GF"), else what a plot's PDF usually is. */
+const titleOf = (rest: string, file: File) => (rest ? rest[0].toUpperCase() + rest.slice(1) : /\.pdf$/i.test(file.name) ? "Plot sheet" : "Document");
 
 /**
  * Plot details from a spreadsheet: one row per plot, keyed by hotspot ID (=
@@ -33,6 +60,7 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const [statusCategories, setStatusCategories] = useState(true);
   const [published, setPublished] = useState<{ ok: number; failed: { hotspotId: string; error?: string }[] } | null>(null);
   const [saved, setSaved] = useState<{ file: string; count: number } | null>(null);
+  const [attachFiles, setAttachFiles] = useState<File[]>([]);
 
   const plots = useMemo(() => scene.shapes.filter((s) => s.kind === "polygon"), [scene.shapes]);
   const [fetchedExisting, setExisting] = useState<number | null>(null);
@@ -70,6 +98,26 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const byLabel = good.filter((m) => m.by === "plotLabel");
   const notFound = good.filter((m) => !m.shapeId);
   const plotsWithout = plots.filter((p) => !matches.some((m) => m.shapeId === p.id)).length;
+  // attached files → their plots, by the plot ID / label in the file name
+  const idIndex = useMemo(() => {
+    const ids = new Map<string, string>();
+    for (const p of plots) {
+      ids.set(lower(p.id), p.id);
+      if (p.label && p.label !== p.id) ids.set(lower(p.label), p.id);
+    }
+    for (const m of good) {
+      const d = m.row.details;
+      ids.set(lower(d.hotspotId), d.hotspotId);
+      if (d.plotLabel) ids.set(lower(d.plotLabel), d.hotspotId);
+      if (m.shapeId) ids.set(lower(m.shapeId), d.hotspotId); // a plot renamed / matched by label gets the row's hotspot ID
+    }
+    return ids;
+  }, [plots, good]);
+  const attached = useMemo(() => attachFiles.map((file) => ({ file, plot: plotOfFile(file.name, idIndex) })), [attachFiles, idIndex]);
+  const attachedOk = attached.filter((a) => a.plot);
+  const attachedPlots = new Set(attachedOk.map((a) => a.plot!.hotspotId));
+  const unmatchedFiles = attached.filter((a) => !a.plot);
+
   const missingStatus = Object.keys(STATUS_COLORS).filter((st) => !project.categories.some((c) => c.id.toLowerCase() === st.toLowerCase() || c.label.toLowerCase() === st.toLowerCase()));
 
   const read = async (f: File) => {
@@ -109,27 +157,76 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   };
   const apply = () => projectChanges && onChange(withChanges());
 
-  /** Saves the rows to the local JSON file; with `publish`, to Contentful too. */
+  /** The attached files stored (dev: public/plot-files/, hosted: this browser) → images / documents by hotspot ID. */
+  const storeAttachments = async () => {
+    const byPlot = new Map<string, { images: string[]; documents: Attachment[] }>();
+    for (const [i, { file, plot }] of attachedOk.entries()) {
+      setBusy(`Attaching files… ${i + 1} / ${attachedOk.length}`);
+      let url: string;
+      if (inBrowser) url = await storeImage(file, file.name);
+      else {
+        const body = new FormData();
+        body.append("file", file);
+        body.append("plot", plot!.hotspotId);
+        const res = await fetch("/api/upload", { method: "POST", body });
+        const data = (await res.json().catch(() => ({}))) as { src?: string; error?: string };
+        if (!res.ok || !data.src) throw new Error(`${file.name}: ${data.error ?? `upload failed (${res.status})`}`);
+        url = data.src;
+      }
+      const entry = byPlot.get(plot!.hotspotId) ?? { images: [], documents: [] };
+      if (IMAGE_FILE.test(file.name)) entry.images.push(url);
+      else entry.documents.push({ title: titleOf(plot!.rest, file), url });
+      byPlot.set(plot!.hotspotId, entry);
+    }
+    return byPlot;
+  };
+
+  /** Saves the rows (and attached files) to the local JSON file; with `publish`, the rows to Contentful too. */
   const store = async (publish: boolean) => {
+    setError(null);
+    let files: Awaited<ReturnType<typeof storeAttachments>>;
+    try {
+      files = await storeAttachments();
+    } catch (e) {
+      setBusy(null);
+      return setError((e as Error).message);
+    }
+    const withFiles = (d: UnitDetails): UnitDetails => (files.has(d.hotspotId) ? mergeUnit(d, { hotspotId: d.hotspotId, ...files.get(d.hotspotId) }) : d);
+    const rowUnits = good.map((m) => withFiles(m.row.details));
+    // plots that only got files (no row in this spreadsheet): their other details stay as they are
+    const fileOnly = [...files.keys()].filter((id) => !rowUnits.some((u) => u.hotspotId === id)).map((id) => mergeUnit(undefined, { hotspotId: id, ...files.get(id) }));
+    const what = [good.length && `details for ${good.length} plots`, attachedOk.length && `${attachedOk.length} files on ${files.size} plots`].filter(Boolean).join(" and ");
     if (inBrowser) {
       // Hosted editor: the details go into the project (one undo step), kept by Save.
-      const details = { ...(project.details ?? {}), ...Object.fromEntries(good.map((m) => [m.row.details.hotspotId, m.row.details])) };
+      const details = { ...(project.details ?? {}) };
+      for (const u of [...rowUnits, ...fileOnly]) details[u.hotspotId] = mergeUnit(details[u.hotspotId], u);
       onChange({ ...withChanges(), details });
+      setBusy(null);
       setSaved({ file: "this project", count: Object.keys(details).length });
-      onStatus(`Added details for ${good.length} plots — Save to keep them`);
+      onStatus(`Added ${what} — Save to keep them`);
       return;
     }
     apply();
-    setBusy(publish ? `Saving and publishing ${good.length} units to Contentful…` : `Saving ${good.length} plots…`);
-    setError(null);
+    setBusy(publish ? `Saving and publishing ${good.length} units to Contentful…` : `Saving ${what}…`);
     try {
-      const res = await fetch("/api/plot-details", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units: good.map((m) => m.row.details), publish }) });
+      // files on plots without a row: saved locally only (Contentful would want every required field)
+      if (fileOnly.length) {
+        const res = await fetch("/api/plot-details", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units: fileOnly }) });
+        if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Saving failed (${res.status})`);
+        if (!rowUnits.length) {
+          const data = (await res.json()) as { local?: { file: string; count: number } };
+          if (data.local) setSaved(data.local);
+          onStatus(`Saved ${what} to ${data.local?.file}`);
+          return;
+        }
+      }
+      const res = await fetch("/api/plot-details", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units: rowUnits, publish }) });
       const data = (await res.json()) as { local?: { file: string; count: number }; results?: { hotspotId: string; ok: boolean; error?: string }[]; ok?: number; error?: string };
       if (data.local) setSaved(data.local);
       if (!res.ok) throw new Error(data.error ?? `Saving failed (${res.status})`);
       if (data.results) setPublished({ ok: data.ok ?? 0, failed: data.results.filter((r) => !r.ok) });
       onStatus(
-        `${publish ? `Published ${data.ok} units to Contentful and saved` : `Saved details for ${good.length} plots`} to ${data.local?.file}` +
+        `${publish ? `Published ${data.ok} units to Contentful and saved` : `Saved ${what}`} to ${data.local?.file}` +
           (projectChanges ? " — also Save the project (renamed plots / status categories)" : ""),
       );
     } catch (e) {
@@ -198,6 +295,37 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
           <input type="file" accept=".xlsx,.csv" disabled={!!busy} className="block w-full text-sm file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-black/10 file:bg-white file:px-2 file:py-1" onChange={(e) => e.target.files?.[0] && read(e.target.files[0])} />
           {file && <span className="block text-xs text-neutral-500">{file.name}</span>}
         </label>
+
+        <div className="space-y-1">
+          <span className={LABEL}>3 · Attach images and PDFs (optional)</span>
+          <input
+            type="file"
+            multiple
+            disabled={!!busy}
+            className="block w-full text-sm file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-black/10 file:bg-white file:px-2 file:py-1"
+            onChange={(e) => setAttachFiles([...(e.target.files ?? [])].filter((f) => ATTACHABLE.test(f.name)))}
+          />
+          <p className="text-xs text-neutral-500">
+            {attachFiles.length ? (
+              <>
+                <b>{attachedOk.length}</b> files for <b>{attachedPlots.size}</b> plots
+                {unmatchedFiles.length > 0 && (
+                  <span className="text-amber-700">
+                    {" "}
+                    · {unmatchedFiles.length} with no plot ID in the name: {unmatchedFiles.slice(0, 3).map((a) => a.file.name).join(", ")}
+                    {unmatchedFiles.length > 3 ? "…" : ""}
+                  </span>
+                )}
+                . Images show as the card&apos;s pictures, PDFs as buttons{inBrowser ? "" : <> (saved in <code>public/plot-files/</code>)</>}.
+              </>
+            ) : (
+              <>
+                Name each file with its plot&apos;s ID — <code>MT01-V5-051.jpg</code>, <code>MT01-V5-051 floor plan.pdf</code> — and pick them all at once. A PDF&apos;s
+                title is the rest of its name (none: “Plot sheet”). A spreadsheet column of links (e.g. <i>Images</i>, <i>Plot sheet</i>) works too.
+              </>
+            )}
+          </p>
+        </div>
 
         {rows && (
           <div className="space-y-2 rounded-md bg-neutral-50 p-3 text-sm">
@@ -284,7 +412,7 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
           </button>
           {!saved && !published && (
             <>
-              <button type="button" className={contentful?.publish ? BUTTON : PRIMARY_BUTTON} onClick={() => store(false)} disabled={!good.length || !!busy}>
+              <button type="button" className={contentful?.publish ? BUTTON : PRIMARY_BUTTON} onClick={() => store(false)} disabled={(!good.length && !attachedOk.length) || !!busy}>
                 {inBrowser ? "Add to project" : "Save to local JSON"}
               </button>
               {contentful?.publish && !inBrowser && (
