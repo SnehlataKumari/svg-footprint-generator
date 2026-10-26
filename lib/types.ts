@@ -16,13 +16,6 @@ export type Point = [number, number];
  */
 export type ShapeKind = "polygon" | "line" | "pin";
 
-/** A file on a plot's card: a PDF (plot sheet, brochure, floor plan…) or any other document. */
-export interface Attachment {
-  title: string;
-  /** Path under /public, an absolute URL, or (hosted editor) a `local:` file. */
-  url: string;
-}
-
 export interface Shape {
   /** Unique within the scene, e.g. "A-012". Also what live data is matched on. */
   id: string;
@@ -42,10 +35,6 @@ export interface Shape {
   info?: Record<string, string>;
   /** Image for the details card (path under /public or absolute URL). */
   image?: string;
-  /** More images for the card's gallery, after `image` — from the plot details (lib/plot-details.ts). */
-  images?: string[];
-  /** Documents shown as buttons on the card — from the plot details. */
-  documents?: Attachment[];
   /** Pins: an icon drawn at the spot instead of the label pill (path under
    *  /public or absolute URL). Default: the category's icon. */
   icon?: string;
