@@ -29,7 +29,10 @@
  * (the editor's Generate button) reads the scene from a file and writes
  * { shapes, transform } to --out instead of touching data/project.json.
  *
- * Label format: LABEL_RE below. Change it (and CHARS) for another naming scheme.
+ * Label format: LABEL_RE below ("<phase>-V<type>-<nnn>"; the phase prefix is
+ * learned from the labels). Change it (and CHARS) for another naming scheme.
+ * --prefix <text> (Generate → Prefix) names the plots "<text>-V<type>-<nnn>"
+ * instead, whatever prefix the labels show.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -41,16 +44,27 @@ import { imageFile } from "./lib/images.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECT_FILE = path.join(ROOT, "data/project.json");
 
-/** A clean read of one label, and the characters OCR may use. */
-const LABEL_RE = /^MT12-V([4-6])-(\d{3})$/;
+/** A clean read of one label ("<phase>-V<type>-<nnn>", e.g. MT11-V5-001), and
+ *  the characters OCR may use. The phase prefix is learned from the labels
+ *  themselves (the most common clean prefix), so every phase works. */
+const LABEL_RE = /^([A-Z]{2}\d{2})-V([1-9])-(\d{3})$/;
 const CHARS = "MT0123456789-V";
-/** OCR often drops or doubles a hyphen: rebuild "MT12-V<type>-<nnn>" from the digits. */
+let PREFIX = null;
+/** A read as this phase's id: clean reads as they are (a misread prefix is
+ *  corrected), others rebuilt from "V<type>" and the 3-digit number — OCR often
+ *  drops or doubles a hyphen. */
+function asLabel(text) {
+  const m = text.match(LABEL_RE);
+  if (m) return PREFIX && m[1] !== PREFIX ? `${PREFIX}-V${m[2]}-${m[3]}` : text;
+  return repairLabel(text);
+}
 function repairLabel(text) {
   const t = text.replace(/[^0-9V]+$/, "");
   const num = t.match(/(\d{3})$/)?.[1];
   const v = t.lastIndexOf("V");
-  const type = v >= 0 ? t[v + 1]?.match(/[4-6]/)?.[0] : undefined;
-  return num && type ? `MT12-V${type}-${num}` : null;
+  // "…V5-001", or with the V lost: "…-5-001"
+  const type = v >= 0 ? t[v + 1]?.match(/[1-9]/)?.[0] : t.match(/-([1-9])-?\d{3}$/)?.[1];
+  return num && type && PREFIX ? `${PREFIX}-V${type}-${num}` : null;
 }
 
 const args = process.argv.slice(2);
@@ -60,6 +74,7 @@ const dry = args.includes("--dry");
 const preview = opt("--preview");
 const sceneFile = opt("--scene-file");
 const out = opt("--out");
+const CUSTOM = opt("--prefix")?.trim().replace(/-+$/, "") || null;
 const log = (...m) => (out ? console.error(...m) : console.log(...m));
 
 // ---------------------------------------------------------------- images
@@ -212,29 +227,53 @@ for (let i = 0; i < N; i++) if (G.data[i] >= 248) white[i] = 1;
 const pills = morph(morph(morph(morph(white, 4, true), 4, false), 9, false), 9, true);
 const pillCC = components(pills, 1, false);
 const isText = (x, y, id) => pillCC.lab[y * W + x] === id && G.data[y * W + x] < 140;
-/** Two touching labels share a pill: split at the widest blank column / row near the middle. */
+/** The labels in a pill: its letters grouped into lines of text. Two labels
+ *  whose pills touch (side by side, stacked or diagonally) come apart cleanly,
+ *  because each label is one row of closely spaced letters. */
 function splitPill(p) {
-  const out = [];
-  const go = (bx) => {
-    if (bx.w < 210 && bx.h < 52) return out.push(bx);
-    const horiz = bx.w >= 210, len = horiz ? bx.w : bx.h, across = horiz ? bx.h : bx.w, prof = [];
-    for (let k = 0; k < len; k++) { let c = 0; for (let m = 0; m < across; m++) if (horiz ? isText(bx.x0 + k, bx.y0 + m, p.id) : isText(bx.x0 + m, bx.y0 + k, p.id)) c++; prof.push(c); }
-    let best = -1, bestLen = 0, s = -1;
-    for (let k = Math.floor(len * 0.25); k < Math.ceil(len * 0.75); k++) {
-      if (!prof[k]) { if (s < 0) s = k; if (k - s + 1 > bestLen) { bestLen = k - s + 1; best = s + (k - s) / 2; } } else s = -1;
+  const w = p.w, seen = new Uint8Array(w * p.h), glyphs = [];
+  for (let y = p.y0; y <= p.y1; y++) for (let x = p.x0; x <= p.x1; x++) {
+    const k = (y - p.y0) * w + (x - p.x0);
+    if (seen[k] || !isText(x, y, p.id)) continue;
+    const g = { x0: x, y0: y, x1: x, y1: y, n: 0 }, stack = [[x, y]];
+    seen[k] = 1;
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      g.n++; g.x0 = Math.min(g.x0, cx); g.x1 = Math.max(g.x1, cx); g.y0 = Math.min(g.y0, cy); g.y1 = Math.max(g.y1, cy);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < p.x0 || nx > p.x1 || ny < p.y0 || ny > p.y1) continue;
+        const nk = (ny - p.y0) * w + (nx - p.x0);
+        if (!seen[nk] && isText(nx, ny, p.id)) { seen[nk] = 1; stack.push([nx, ny]); }
+      }
     }
-    if (best < 0) return out.push(bx);
-    const cut = Math.round(best);
-    go(horiz ? { ...bx, x1: bx.x0 + cut - 1, w: cut } : { ...bx, y1: bx.y0 + cut - 1, h: cut });
-    go(horiz ? { ...bx, x0: bx.x0 + cut, w: bx.w - cut } : { ...bx, y0: bx.y0 + cut, h: bx.h - cut });
-  };
-  go(p);
-  return out;
+    if (g.n >= 3) glyphs.push(g);
+  }
+  // letters of one label: on the same line, close together
+  const parent = glyphs.map((_, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < glyphs.length; i++) for (let j = i + 1; j < glyphs.length; j++) {
+    const a = glyphs[i], b = glyphs[j];
+    const overlapY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) + 1;
+    const gapX = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1) - 1;
+    const tall = Math.max(a.y1 - a.y0, b.y1 - b.y0) + 1;
+    if (overlapY >= 0.5 * (Math.min(a.y1 - a.y0, b.y1 - b.y0) + 1) && gapX <= 0.8 * tall) parent[find(i)] = find(j);
+  }
+  const groups = new Map();
+  for (const [i, g] of glyphs.entries()) {
+    const r = find(i), b = groups.get(r);
+    if (!b) groups.set(r, { ...g });
+    else { b.x0 = Math.min(b.x0, g.x0); b.y0 = Math.min(b.y0, g.y0); b.x1 = Math.max(b.x1, g.x1); b.y1 = Math.max(b.y1, g.y1); b.n += g.n; }
+  }
+  const PAD = 4;
+  return [...groups.values()].map((b) => {
+    const x0 = Math.max(p.x0, b.x0 - PAD), y0 = Math.max(p.y0, b.y0 - PAD), x1 = Math.min(p.x1, b.x1 + PAD), y1 = Math.min(p.y1, b.y1 + PAD);
+    return { x0, y0, x1, y1, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  });
 }
 const labelBoxes = [];
 for (const p of pillCC.comps) {
   if (p.h < 18 || p.w < 60 || p.w > 600 || p.h > 140) continue;
-  for (const b of splitPill(p)) if (b.w > 60 && b.w < 210 && b.h > 18 && b.h < 52) labelBoxes.push({ ...b, pill: p.id });
+  for (const b of splitPill(p)) if (b.w > 60 && b.w < 260 && b.h > 14 && b.h < 52) labelBoxes.push({ ...b, pill: p.id });
 }
 /** The label's text only: black on white, upscaled. */
 function cleanLabel(l, scale) {
@@ -254,24 +293,38 @@ const worker = await createWorker("eng", 1, { langPath: ROOT, cacheMethod: "none
 await worker.setParameters({ tessedit_char_whitelist: CHARS, tessedit_pageseg_mode: "7", user_defined_dpi: "300" });
 const labels = [];
 for (const [n, b] of labelBoxes.entries()) {
-  const votes = new Map(), texts = [];
+  const texts = [];
   for (const scale of [3, 4, 5]) {
     const { data } = await worker.recognize(await cleanLabel(b, scale));
-    const text = data.text.trim().replace(/\s+/g, "");
-    texts.push(text);
-    const id = LABEL_RE.test(text) ? text : repairLabel(text);
-    if (id) votes.set(id, (votes.get(id) ?? 0) + (LABEL_RE.test(text) ? 2 : 1));
+    texts.push(data.text.trim().replace(/\s+/g, ""));
   }
-  const id = [...votes].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
-  labels.push({ ...b, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, id, texts });
+  labels.push({ ...b, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, id: null, texts });
   if (n % 40 === 39) log(`    read ${n + 1} / ${labelBoxes.length}`);
 }
 await worker.terminate();
+// the phase prefix: the most common one among clean reads
+const prefixes = new Map();
+for (const l of labels) for (const t of l.texts) { const m = t.match(LABEL_RE); if (m) prefixes.set(m[1], (prefixes.get(m[1]) ?? 0) + 1); }
+// (none read cleanly but a prefix of your own: any stand-in rebuilds the reads, it's swapped below)
+PREFIX = [...prefixes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? (CUSTOM ? "XX00" : null);
+log(`    label format: ${PREFIX ?? "?"}-V<type>-<nnn>${CUSTOM ? ` → named ${CUSTOM}-V<type>-<nnn>` : ""}`);
+for (const l of labels) {
+  const votes = new Map();
+  for (const t of l.texts) {
+    const id = asLabel(t);
+    if (id) votes.set(id, (votes.get(id) ?? 0) + (LABEL_RE.test(t) ? 2 : 1));
+  }
+  l.id = [...votes].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
+}
 // ids are unique: a duplicate that also read as a free id takes that one
 for (const l of labels) {
   if (!l.id || labels.filter((o) => o.id === l.id).length < 2) continue;
-  for (const t of l.texts) { const alt = LABEL_RE.test(t) ? t : repairLabel(t); if (alt && alt !== l.id && !labels.some((o) => o.id === alt)) { l.id = alt; break; } }
+  for (const t of l.texts) { const alt = asLabel(t); if (alt && alt !== l.id && !labels.some((o) => o.id === alt)) { l.id = alt; break; } }
 }
+// your own prefix in place of the one on the labels
+if (CUSTOM) for (const l of labels) { const m = l.id?.match(LABEL_RE); if (m) l.id = `${CUSTOM}-V${m[2]}-${m[3]}`; }
+// white boxes with almost no text (roofs, signs) aren't labels
+for (let i = labels.length - 1; i >= 0; i--) if (!labels[i].id && !labels[i].texts.some((t) => t.length >= 6)) labels.splice(i, 1);
 const unread = labels.filter((l) => !l.id);
 const dupes = [...new Set(labels.filter((l) => l.id && labels.filter((o) => o.id === l.id).length > 1).map((l) => l.id))];
 unread.forEach((l, i) => (l.id = `UNREAD-${i + 1}`));
@@ -626,19 +679,11 @@ for (let pass = 0; pass < 2; pass++) {
 }
 
 // Any overlap left (neighbours at different angles: a curved block, a corner)
-// is cut along a line through the middle of the overlap, square to the line
-// between the two plots' labels; each keeps its own side.
+// is split between the two: each plot moves only its side that faces the
+// other, inward and parallel to itself, so every plot keeps four straight
+// sides (no corners cut off).
 {
   const area = (P) => { let a = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; };
-  const halfPlane = (P, nx, ny, c) => { // keep nx·x + ny·y <= c
-    const out = [], side = (q) => nx * q[0] + ny * q[1] - c;
-    for (let i = 0; i < P.length; i++) {
-      const A = P[i], B = P[(i + 1) % P.length], sa = side(A), sb = side(B);
-      if (sa <= 0) out.push(A);
-      if (sa < 0 !== sb < 0 && sa !== sb) { const t = sa / (sa - sb); out.push([A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]); }
-    }
-    return out;
-  };
   const intersect = (P, Q) => { // P ∩ Q, Q convex (Sutherland–Hodgman)
     let sa = 0;
     for (let i = 0; i < Q.length; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[(i + 1) % Q.length]; sa += x1 * y2 - x2 * y1; }
@@ -658,19 +703,55 @@ for (let pass = 0; pass < 2; pass++) {
     }
     return out;
   };
+  const meet = (p1, d1, p2, d2) => {
+    const den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) < 1e-9) return null;
+    const s = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / den;
+    return [p1[0] + s * d1[0], p1[1] + s * d1[1]];
+  };
+  /** Moves the side of quad P that faces `toward` inward until it is clear of the overlap I by `share` of its depth. */
+  const pullSide = (P, toward, I, share) => {
+    const cx = P.reduce((s, q) => s + q[0], 0) / P.length, cy = P.reduce((s, q) => s + q[1], 0) / P.length;
+    let best = null;
+    for (let i = 0; i < P.length; i++) {
+      const A = P[i], B = P[(i + 1) % P.length], L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+      let n = [(B[1] - A[1]) / L, -(B[0] - A[0]) / L];
+      if (n[0] * ((A[0] + B[0]) / 2 - cx) + n[1] * ((A[1] + B[1]) / 2 - cy) < 0) n = [-n[0], -n[1]];
+      const facing = n[0] * (toward[0] - cx) + n[1] * (toward[1] - cy);
+      if (!best || facing > best.facing) best = { i, n, facing, c: n[0] * A[0] + n[1] * A[1] };
+    }
+    const depth = best.c - Math.min(...I.map((q) => best.n[0] * q[0] + best.n[1] * q[1]));
+    if (depth <= 0) return P;
+    const shift = depth * share, i = best.i, k = P.length;
+    const A = P[i], B = P[(i + 1) % k], d = [B[0] - A[0], B[1] - A[1]];
+    const p = [A[0] - best.n[0] * shift, A[1] - best.n[1] * shift];
+    const prev = P[(i + k - 1) % k], next = P[(i + 2) % k];
+    const nA = meet(prev, [A[0] - prev[0], A[1] - prev[1]], p, d), nB = meet(B, [next[0] - B[0], next[1] - B[1]], p, d);
+    if (!nA || !nB) return P;
+    const out = P.slice();
+    out[i] = nA;
+    out[(i + 1) % k] = nB;
+    return out;
+  };
   let cut = 0;
   for (let a = 0; a < outlines.length; a++) for (let b = a + 1; b < outlines.length; b++) {
     const A = outlines[a], B = outlines[b];
     if (Math.hypot(A.cx - B.cx, A.cy - B.cy) > 260) continue;
-    const I = intersect(A.ref, B.ref);
+    let I = intersect(A.ref, B.ref);
     if (I.length < 3 || area(I) < 4) continue;
-    const mx = I.reduce((s, q) => s + q[0], 0) / I.length, my = I.reduce((s, q) => s + q[1], 0) / I.length;
-    const L = Math.hypot(B.cx - A.cx, B.cy - A.cy) || 1, nx = (B.cx - A.cx) / L, ny = (B.cy - A.cy) / L, c = nx * mx + ny * my;
-    A.ref = halfPlane(A.ref, nx, ny, c);
-    B.ref = halfPlane(B.ref, -nx, -ny, -c);
+    for (let round = 0; round < 3 && I.length >= 3 && area(I) >= 4; round++) {
+      A.ref = pullSide(A.ref, [B.cx, B.cy], I, 0.5);
+      B.ref = pullSide(B.ref, [A.cx, A.cy], I, 0.5);
+      I = intersect(A.ref, B.ref);
+      if (round === 1 && I.length >= 3) { // what's left: the facing sides go all the way
+        A.ref = pullSide(A.ref, [B.cx, B.cy], I, 0.5);
+        B.ref = pullSide(B.ref, [A.cx, A.cy], I, 0.5);
+        I = intersect(A.ref, B.ref);
+      }
+    }
     cut++;
   }
-  log(`    ${cut} overlaps between differently angled neighbours cut`);
+  log(`    ${cut} overlaps between differently angled neighbours split`);
 }
 
 /** Outline of a mask (Moore trace), simplified. */

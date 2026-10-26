@@ -5,7 +5,8 @@ import { facilitiesForScene } from "@/lib/gis-import";
 import type { Category, Scene, Shape } from "@/lib/types";
 import { BUTTON, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
 
-const WORLD_FILE = ".wpw,.pgw,.jgw,.jpw,.tfw,.tifw,.wld";
+/** World file extensions. Checked here, not with `accept`: file dialogs (macOS) grey out extensions they don't know. */
+const WORLD_FILE = /\.(wpw|pgw|jgw|jpw|tfw|tifw|wld|[a-z]{2}w)$/i;
 
 interface Props {
   scene: Scene;
@@ -52,11 +53,14 @@ export function SceneFacilities({ scene, onClose, onAdd }: Props) {
     }
   };
 
-  const fileRow = (label: string, hint: string, accept: string, file: File | null, set: (f: File | null) => void) => (
+  const notWorld = !!world && !WORLD_FILE.test(world.name);
+  const missing = [!xlsx && "the spreadsheet", !pdf && "the map PDF", (!world || notWorld) && "the world file"].filter(Boolean);
+
+  const fileRow = (label: string, hint: string, accept: string | undefined, file: File | null, set: (f: File | null) => void, problem?: string) => (
     <label className="block space-y-1">
       <span className={LABEL}>{label}</span>
       <input type="file" accept={accept} disabled={busy} className="block w-full text-sm file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-black/10 file:bg-white file:px-2 file:py-1" onChange={(e) => set(e.target.files?.[0] ?? null)} />
-      <span className="block text-xs text-neutral-500">{file ? `${file.name} · ${(file.size / 1e6).toFixed(1)} MB` : hint}</span>
+      <span className={`block text-xs ${problem ? "text-red-700" : "text-neutral-500"}`}>{problem ?? (file ? `${file.name} · ${(file.size / 1e6).toFixed(1)} MB` : hint)}</span>
     </label>
   );
 
@@ -81,23 +85,26 @@ export function SceneFacilities({ scene, onClose, onAdd }: Props) {
         {fileRow(
           "World file of this scene's image",
           "The small file that came with the image (e.g. MT11.wpw next to MT11.webp) — it says where the image lies on the map",
-          WORLD_FILE,
+          undefined,
           world,
           setWorld,
+          notWorld ? `${world!.name} isn't a world file — pick the small .wpw / .pgw / .jgw… file with the same name as the image` : undefined,
         )}
 
         {error && <p className="rounded-md bg-red-50 p-2 text-sm text-red-700">{error}</p>}
 
         <div className="flex items-center justify-end gap-2">
-          {busy && (
+          {busy ? (
             <span className="mr-auto text-sm text-neutral-600">
               {step} {seconds}s
             </span>
+          ) : (
+            missing.length > 0 && <span className="mr-auto text-xs text-neutral-500">Still needed: {missing.join(", ")}</span>
           )}
           <button type="button" className={BUTTON} onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="button" className={PRIMARY_BUTTON} onClick={run} disabled={!xlsx || !pdf || !world || busy}>
+          <button type="button" className={PRIMARY_BUTTON} onClick={run} disabled={missing.length > 0 || busy}>
             {busy ? "Adding…" : "Add to this scene"}
           </button>
         </div>

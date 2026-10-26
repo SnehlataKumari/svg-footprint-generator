@@ -19,6 +19,8 @@ interface Props {
   /** Merged into every selected shape's own `style`. */
   onStyle: (patch: Partial<PlotStyle>) => void;
   onRename: (id: string) => void;
+  /** Every selected id starting with `from` gets `to` in its place. */
+  onReplacePrefix: (from: string, to: string) => void;
   onDelete: () => void;
   onClearSelection: () => void;
 }
@@ -46,7 +48,7 @@ const sameStyle = <K extends keyof PlotStyle>(shapes: Shape[], key: K) =>
   shapes.every((s) => s.style?.[key] === shapes[0].style?.[key]) ? shapes[0].style?.[key] : undefined;
 
 /** Right panel: the scene's shape list and the selection's properties. */
-export function ShapePanel({ project, scene, selected, onSelect, onChange, onStyle, onRename, onDelete, onClearSelection }: Props) {
+export function ShapePanel({ project, scene, selected, onSelect, onChange, onStyle, onRename, onReplacePrefix, onDelete, onClearSelection }: Props) {
   const [query, setQuery] = useState("");
   const selectedIds = new Set(selected.map((s) => s.id));
   const shapes = useMemo(() => {
@@ -180,6 +182,8 @@ export function ShapePanel({ project, scene, selected, onSelect, onChange, onSty
             </>
           )}
 
+          <PrefixField key={selected.map((s) => s.id).join(",")} selected={selected} onReplace={onReplacePrefix} />
+
           <label className="flex items-center gap-1.5 text-sm">
             <input type="checkbox" checked={selected.every((s) => s.hidden)} onChange={(e) => onChange({ hidden: e.target.checked || undefined })} />
             Hidden in viewer
@@ -191,6 +195,52 @@ export function ShapePanel({ project, scene, selected, onSelect, onChange, onSty
         </div>
       )}
     </aside>
+  );
+}
+
+/** The selected ids' common start, up to its last "-" (MT12-V5-001, MT12-V6-002 → "MT12-"). */
+function commonPrefix(ids: string[]) {
+  let p = ids[0] ?? "";
+  for (const id of ids) while (!id.startsWith(p)) p = p.slice(0, -1);
+  return p.includes("-") ? p.slice(0, p.lastIndexOf("-") + 1) : p;
+}
+
+/** "Replace prefix": MT12-… → MT11-… on the selected ids, numbers kept. */
+function PrefixField({ selected, onReplace }: { selected: Shape[]; onReplace: (from: string, to: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [from, setFrom] = useState(() => commonPrefix(selected.map((s) => s.id)));
+  const [to, setTo] = useState("");
+  const matching = selected.filter((s) => from && s.id.startsWith(from));
+  if (!open) {
+    return (
+      <button type="button" className="cursor-pointer text-xs text-sky-700 underline" onClick={() => setOpen(true)}>
+        Replace id prefix…
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-1.5 rounded-md border border-black/10 p-2">
+      <span className={LABEL}>Replace id prefix</span>
+      <div className="flex items-center gap-1.5">
+        <input className={`${INPUT} font-mono`} value={from} onChange={(e) => setFrom(e.target.value)} placeholder="MT12-" aria-label="Prefix to replace" />
+        <span className="text-neutral-400">→</span>
+        <input className={`${INPUT} font-mono`} value={to} onChange={(e) => setTo(e.target.value)} placeholder="MT11-" aria-label="New prefix" />
+      </div>
+      <p className="text-xs text-neutral-500">
+        {matching.length
+          ? `${matching.length} of ${selected.length} selected: ${matching[0].id} → ${to + matching[0].id.slice(from.length)}${matching.length > 1 ? "…" : ""}`
+          : `None of the selected ids start with “${from}”.`}{" "}
+        The id is the hotspot ID — CRM / Contentful data joins on it.
+      </p>
+      <div className="flex gap-1.5">
+        <button type="button" className={`${BUTTON} h-7 text-xs`} disabled={!matching.length || from === to} onClick={() => onReplace(from, to)}>
+          Rename {matching.length}
+        </button>
+        <button type="button" className={`${BUTTON} h-7 text-xs`} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
