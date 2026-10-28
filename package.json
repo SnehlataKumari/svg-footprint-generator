@@ -15,7 +15,8 @@
     "areas:from-reference": "node scripts/areas-from-reference.mjs",
     "lines:from-reference": "node scripts/lines-from-reference.mjs",
     "amenities:from-reference": "node scripts/amenities-from-reference.mjs",
-    "import:facilities": "node --max-old-space-size=12000 scripts/import-facilities.mjs"
+    "import:facilities": "node --max-old-space-size=12000 scripts/import-facilities.mjs", 
+     "import-editor": "node scripts/import-editor.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.2",

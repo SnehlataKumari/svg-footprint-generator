@@ -2,7 +2,7 @@ import "server-only";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fetchUnits } from "./contentful";
-import { applyDetails, type UnitDetails } from "./plot-details";
+import { applyDetails, type UnitDetails, withFiles } from "./plot-details";
 import type { Project } from "./types";
 
 /** The single data file behind the whole site. Edited with /editor (which
@@ -32,10 +32,10 @@ export async function readLocalDetails(project: Pick<Project, "title">): Promise
   }
 }
 
-/** Adds / replaces plots in the local file (by hotspot ID). Returns the file's path and size. */
+/** Adds / replaces plots in the local file (by hotspot ID; their file references stay unless replaced). Returns the file's path and size. */
 export async function saveLocalDetails(project: Pick<Project, "title">, units: UnitDetails[]) {
   const current = await readLocalDetails(project);
-  for (const u of units) current[u.hotspotId] = u;
+  for (const u of units) current[u.hotspotId] = withFiles(current[u.hotspotId], u);
   await mkdir(DETAILS_DIR, { recursive: true });
   const file = detailsFile(project);
   await writeFile(file, JSON.stringify(current, null, 2) + "\n", "utf8");
@@ -46,7 +46,10 @@ export async function saveLocalDetails(project: Pick<Project, "title">, units: U
 export async function getDetails(project: Project): Promise<{ details: Record<string, UnitDetails>; source: "contentful" | "local" }> {
   const contentful = await fetchUnits();
   const local = { ...(project.details ?? {}), ...(await readLocalDetails(project)) };
-  return { details: { ...local, ...contentful }, source: Object.keys(contentful).length ? "contentful" : "local" };
+  // Contentful's entry over the local one; the local file references (cutsheet, facade) stay
+  const details = { ...local };
+  for (const [id, unit] of Object.entries(contentful)) details[id] = withFiles(local[id], unit);
+  return { details, source: Object.keys(contentful).length ? "contentful" : "local" };
 }
 
 /** The project as visitors see it: plot details merged onto the shapes by hotspot ID. */

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getProject } from "@/lib/project";
 import { sceneHref } from "@/lib/scene-tree";
@@ -7,6 +8,16 @@ import { sceneHref } from "@/lib/scene-tree";
 export default async function Home() {
   const project = await getProject();
   const start = project.scenes.find((s) => s.id === project.startScene) ?? project.scenes[0];
-  if (!start) return <p className="p-8 text-white">No scenes yet — open /editor to add one.</p>;
+  if (!start) {
+    return (
+      <p className="p-8 text-white">
+        No scenes yet — open{" "}
+        <Link href="/editor" className="underline underline-offset-2 hover:text-white/80">
+          /editor
+        </Link>{" "}
+        to add one.
+      </p>
+    );
+  }
   redirect(sceneHref(start.id));
 }
