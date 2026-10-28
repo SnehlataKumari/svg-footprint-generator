@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { editorStorage } from "@/lib/browser-store";
-import { STATUS_COLORS, templateCsv, type UnitDetails } from "@/lib/plot-details";
+import { STATUS_COLORS, templateCsv, type UnitDetails, withFiles } from "@/lib/plot-details";
 import type { Project, Scene } from "@/lib/types";
 import { BUTTON, LABEL, PRIMARY_BUTTON, SURFACE } from "../ui";
 
@@ -16,6 +16,42 @@ interface Props {
 
 type Row = { details: UnitDetails; errors: string[]; warnings?: string[] };
 type Match = { row: Row; shapeId?: string; by?: "hotspotId" | "plotLabel" };
+
+const lower = (s: string) => s.toLowerCase();
+/** "MT03-V6-158(1)" / "… (2)": a second download of the same file. */
+const COPY = /\s*\(\d+\)$/;
+
+/** Each file's path inside the picked folder, without the folders all of them share (…/Cutsheets/MT09/MT09-V5-062.pdf → MT09/MT09-V5-062.pdf). */
+function relativePaths(files: File[]): string[] {
+  const parts = files.map((f) => (f.webkitRelativePath || f.name).split("/"));
+  let common = 0;
+  while (parts.length && parts.every((p) => p.length - 1 > common && p[common] === parts[0][common])) common++;
+  return parts.map((p) => p.slice(common).join("/"));
+}
+
+/** Cutsheets by plot: file name = plot ID / label (lower case) → its path; the plain file over a "(1)" copy. */
+function cutsheetIndex(files: File[]): Map<string, string> {
+  const paths = relativePaths(files), out = new Map<string, string>();
+  const entries = files.map((f, i) => ({ base: f.name.replace(/\.pdf$/i, ""), path: paths[i] })).filter((e, i) => /\.pdf$/i.test(files[i].name));
+  for (const copy of [false, true])
+    for (const e of entries) {
+      const key = lower(e.base.replace(COPY, ""));
+      if (COPY.test(e.base) === copy && !out.has(key)) out.set(key, e.path);
+    }
+  return out;
+}
+
+/** Facade files by facade option: "Type1.pdf", "Facade type 2.jpg" → Type1, Type2. */
+function facadeIndex(files: File[]): Map<string, string> {
+  const paths = relativePaths(files), out = new Map<string, string>();
+  files.forEach((f, i) => {
+    const n = f.name.match(/type\s*[-_]?\s*(\d)/i)?.[1];
+    if (n && !out.has(`Type${n}`)) out.set(`Type${n}`, paths[i]);
+  });
+  return out;
+}
+
+const FOLDER_INPUT = "block w-full text-sm file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-black/10 file:bg-white file:px-2 file:py-1";
 
 /**
  * Plot details from a spreadsheet: one row per plot, keyed by hotspot ID (=
@@ -33,6 +69,8 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const [statusCategories, setStatusCategories] = useState(true);
   const [published, setPublished] = useState<{ ok: number; failed: { hotspotId: string; error?: string }[] } | null>(null);
   const [saved, setSaved] = useState<{ file: string; count: number } | null>(null);
+  const [sheetFiles, setSheetFiles] = useState<File[]>([]);
+  const [facadeFiles, setFacadeFiles] = useState<File[]>([]);
 
   const plots = useMemo(() => scene.shapes.filter((s) => s.kind === "polygon"), [scene.shapes]);
   const [fetchedExisting, setExisting] = useState<number | null>(null);
@@ -70,6 +108,20 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const byLabel = good.filter((m) => m.by === "plotLabel");
   const notFound = good.filter((m) => !m.shapeId);
   const plotsWithout = plots.filter((p) => !matches.some((m) => m.shapeId === p.id)).length;
+  // cutsheets (by the plot ID / label in the file name) and facade files (by facade option) → each row's details
+  const sheets = useMemo(() => cutsheetIndex(sheetFiles), [sheetFiles]);
+  const facades = useMemo(() => facadeIndex(facadeFiles), [facadeFiles]);
+  const sheetOf = (d: UnitDetails) => sheets.get(lower(d.hotspotId)) ?? (d.plotLabel ? sheets.get(lower(d.plotLabel)) : undefined);
+  const facadeOf = (d: UnitDetails) => (d.facadeOption ? facades.get(d.facadeOption) : undefined);
+  const units = good.map((m) => {
+    const d = m.row.details, sheet = sheetOf(d), facade = facadeOf(d);
+    return { ...d, ...(sheet ? { plotSheet: { file: sheet } } : {}), ...(facade ? { facadeImage: { file: facade } } : {}) };
+  });
+  const withSheet = units.filter((u) => u.plotSheet && sheetOf(u)).length;
+  const usedSheets = new Set(good.map((m) => sheetOf(m.row.details)).filter(Boolean));
+  const withFacade = units.filter((u) => facadeOf(u)).length;
+  const noFacadeOption = good.filter((m) => !m.row.details.facadeOption).length;
+
   const missingStatus = Object.keys(STATUS_COLORS).filter((st) => !project.categories.some((c) => c.id.toLowerCase() === st.toLowerCase() || c.label.toLowerCase() === st.toLowerCase()));
 
   const read = async (f: File) => {
@@ -113,7 +165,8 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
   const store = async (publish: boolean) => {
     if (inBrowser) {
       // Hosted editor: the details go into the project (one undo step), kept by Save.
-      const details = { ...(project.details ?? {}), ...Object.fromEntries(good.map((m) => [m.row.details.hotspotId, m.row.details])) };
+      const details = { ...(project.details ?? {}) };
+      for (const u of units) details[u.hotspotId] = withFiles(details[u.hotspotId], u);
       onChange({ ...withChanges(), details });
       setSaved({ file: "this project", count: Object.keys(details).length });
       onStatus(`Added details for ${good.length} plots — Save to keep them`);
@@ -123,7 +176,7 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
     setBusy(publish ? `Saving and publishing ${good.length} units to Contentful…` : `Saving ${good.length} plots…`);
     setError(null);
     try {
-      const res = await fetch("/api/plot-details", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units: good.map((m) => m.row.details), publish }) });
+      const res = await fetch("/api/plot-details", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units, publish }) });
       const data = (await res.json()) as { local?: { file: string; count: number }; results?: { hotspotId: string; ok: boolean; error?: string }[]; ok?: number; error?: string };
       if (data.local) setSaved(data.local);
       if (!res.ok) throw new Error(data.error ?? `Saving failed (${res.status})`);
@@ -198,6 +251,34 @@ export function PlotDetails({ project, scene, onChange, onStatus, onClose }: Pro
           <input type="file" accept=".xlsx,.csv" disabled={!!busy} className="block w-full text-sm file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-black/10 file:bg-white file:px-2 file:py-1" onChange={(e) => e.target.files?.[0] && read(e.target.files[0])} />
           {file && <span className="block text-xs text-neutral-500">{file.name}</span>}
         </label>
+
+        <div className="space-y-1.5">
+          <span className={LABEL}>3 · Cutsheets and facades (optional)</span>
+          <p className="text-xs text-neutral-500">
+            Pick the folders as they came: only the file names are read, nothing is uploaded. Each row gets <code>plotSheet</code> (the cutsheet named like the
+            plot, e.g. <code>MT09-V5-062.pdf</code>) and <code>facadeImage</code> (the file of its facade option, e.g. <code>Type1.pdf</code>) as paths inside
+            the folder — for uploading the files to Contentful with the JSON.
+          </p>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium">Cutsheets folder</span>
+            <input type="file" multiple disabled={!!busy} className={FOLDER_INPUT} {...{ webkitdirectory: "", directory: "" }} onChange={(e) => setSheetFiles([...(e.target.files ?? [])])} />
+            {sheetFiles.length > 0 && (
+              <span className="block text-xs text-neutral-600">
+                {sheets.size} cutsheets{rows ? <> · <b>{withSheet}</b> of {good.length} rows have one{usedSheets.size < sheets.size ? ` · ${sheets.size - usedSheets.size} for plots not in the spreadsheet` : ""}</> : " — upload the spreadsheet to map them"}
+              </span>
+            )}
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium">Facade types folder</span>
+            <input type="file" multiple disabled={!!busy} className={FOLDER_INPUT} {...{ webkitdirectory: "", directory: "" }} onChange={(e) => setFacadeFiles([...(e.target.files ?? [])])} />
+            {facadeFiles.length > 0 && (
+              <span className="block text-xs text-neutral-600">
+                {facades.size ? [...facades.keys()].sort().join(", ") : "No Type1…Type4 file names found"}
+                {rows ? <> · <b>{withFacade}</b> of {good.length} rows get one{noFacadeOption ? ` · ${noFacadeOption} ${noFacadeOption === 1 ? "row has" : "rows have"} no facade option` : ""}</> : " — upload the spreadsheet to map them"}
+              </span>
+            )}
+          </label>
+        </div>
 
         {rows && (
           <div className="space-y-2 rounded-md bg-neutral-50 p-3 text-sm">

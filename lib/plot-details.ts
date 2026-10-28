@@ -21,9 +21,29 @@ export interface UnitDetails {
   gfa?: number;
   parking?: number;
   confirmed?: boolean;
+  /** The plot's cutsheet (Contentful `plotSheet`, a PDF asset): the file's path in the folder it was picked from,
+   *  for whoever uploads the files to Contentful. Not sent as a field. */
+  plotSheet?: FileRef;
+  /** The facade picture of the plot's `facadeOption` (Type1 → Type1.pdf): its path, like `plotSheet`. */
+  facadeImage?: FileRef;
   /** Columns the Contentful model doesn't have: kept locally and shown on the
    *  details card, not sent to Contentful. */
   extra?: Record<string, string>;
+}
+
+/** A file the details point at (cutsheet, facade): its path relative to the folder it was picked from. */
+export interface FileRef {
+  file: string;
+}
+
+/** Fields that point at files: kept when the same plots' details are saved again without them. */
+export const FILE_FIELDS = ["plotSheet", "facadeImage"] as const;
+
+/** The new details of a plot over the stored ones; the stored file references stay unless replaced. */
+export function withFiles(stored: UnitDetails | undefined, next: UnitDetails): UnitDetails {
+  const out = { ...next };
+  for (const k of FILE_FIELDS) if (!out[k] && stored?.[k]) out[k] = stored[k];
+  return out;
 }
 
 export type FieldKind = "text" | "number" | "integer" | "boolean";
@@ -62,6 +82,8 @@ export const STATUS_COLORS: Record<string, string> = {
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+/** Spreadsheet columns naming a plot's files (a file name / path per cell). */
+const FILE_COLUMNS: Record<string, (typeof FILE_FIELDS)[number]> = { plotsheet: "plotSheet", cutsheet: "plotSheet", facadeimage: "facadeImage", facadefile: "facadeImage" };
 /** GIS / spreadsheet bookkeeping columns: not plot details, never shown. */
 const IGNORED = new Set(["sno", "no", "objectid", "fid", "oid", "shape", "shapelength", "shapearea", "shapeleng", "globalid"]);
 const EMPTY = /^(|<null>|null|n\/a|na|-|—)$/i;
@@ -88,7 +110,9 @@ export function parseRow(headers: string[], cells: string[]): { details: UnitDet
   fields.forEach((f, i) => {
     const raw = (cells[i] ?? "").trim();
     if (!f) {
-      if (raw && !EMPTY.test(raw) && headers[i]?.trim() && !IGNORED.has(norm(headers[i]))) extra[headers[i].trim()] = raw.replace(/^(-?\d+)\.0+$/, "$1");
+      const fileField = FILE_COLUMNS[norm(headers[i] ?? "")];
+      if (fileField && raw && !EMPTY.test(raw) && /\.\w{2,4}$/.test(raw)) details[fileField] = { file: raw };
+      else if (raw && !EMPTY.test(raw) && headers[i]?.trim() && !IGNORED.has(norm(headers[i]))) extra[headers[i].trim()] = raw.replace(/^(-?\d+)\.0+$/, "$1");
       return;
     }
     if (EMPTY.test(raw)) return;

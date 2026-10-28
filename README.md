@@ -197,6 +197,17 @@ status, area…) live in Contentful as `unit` entries. The only link is the
    project — Save it too. With Contentful set up, **Save & publish to
    Contentful** also creates/updates + publishes one `unit` per row (the local
    JSON stays as a backup).
+4. **Cutsheets and facades** (optional, step 3 in the dialog): pick the
+   cutsheets folder (one PDF per plot, named like it: `MT09/MT09-V5-062.pdf`)
+   and the facade types folder (`Type1.pdf` … `Type4.pdf`). Only the file
+   names are read — nothing is uploaded. Each row gets
+   `"plotSheet": { "file": "MT09/MT09-V5-062.pdf" }` (by its hotspot ID or plot
+   label; the plain file over a "(1)" copy) and
+   `"facadeImage": { "file": "Type1.pdf" }` (by its facade option), as paths
+   inside the picked folder — for whoever uploads the files to Contentful with
+   the JSON (**Download JSON**). A *Plot sheet* / *Cutsheet* / *Facade image*
+   column of file names in the spreadsheet does the same. They are not sent as
+   Contentful fields, and stay when the details are uploaded again.
 
 Contentful is optional. To add it, put in `.env.local` (see `.example.env`;
 never committed): `CONTENTFUL_SPACE_ID`, `CONTENTFUL_ENVIRONMENT`,
