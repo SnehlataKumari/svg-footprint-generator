@@ -13,5 +13,6 @@ export default async function EditorPage({ searchParams }: { searchParams: Promi
   if (process.env.NODE_ENV === "development" && browser === undefined) {
     return <Editor initialProject={await getProject()} initialSceneId={scene} />;
   }
-  return <BrowserEditor initialSceneId={scene} />;
+  // First visit in this browser: start from the site's own project.
+  return <BrowserEditor initialSceneId={scene} starter={await getProject()} />;
 }

@@ -96,10 +96,11 @@ export interface StoredProjectEntry {
   updated: string;
 }
 
-/** The open project (the one /editor shows), or an empty one. */
-export async function openedProject(): Promise<Project> {
+/** The open project (the one /editor shows); before anything is saved in this
+ *  browser, `starter` (the deployed data/project.json) or an empty one. */
+export async function openedProject(starter?: Project): Promise<Project> {
   const name = await get<string>("meta", "current");
-  const p = (name && (await get<{ project: Project }>("projects", name))?.project) || EMPTY_PROJECT;
+  const p = (name && (await get<{ project: Project }>("projects", name))?.project) || starter || EMPTY_PROJECT;
   await loadImages(p);
   return p;
 }

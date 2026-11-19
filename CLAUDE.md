@@ -87,6 +87,14 @@ There is no test suite. Verify with lint + type-check, the generators'
 - Secrets only in `.env.local` (git-ignored; template `.example.env`). Never log
   or return tokens to the browser.
 
+## Commits & history
+
+- **Never** add `Co-Authored-By: Claude` (or any Claude / AI attribution) to
+  commit messages, PR titles or descriptions. Write them as the user's own.
+- **`HISTORY.md` is the project log.** For every change you make (code, data,
+  config), add an entry at the top: date (YYYY-MM-DD), what changed and why,
+  files touched. Commit it together with the change.
+
 ## Pitfalls (learned the hard way)
 
 - **Stale editor tabs overwrite data.** The editor saves its whole in-memory
