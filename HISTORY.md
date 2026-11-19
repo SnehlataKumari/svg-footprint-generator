@@ -3,6 +3,14 @@
 What changed in this project and why — newest first. Add an entry with every
 change (see `CLAUDE.md` → Commits & history).
 
+## 2026-11-19 — Add the project's data spreadsheet for reference
+
+- **Data:** `data/new-project-data.xlsx` added, copied from
+  `interactive-al-metlaa-poc/data/`, so the team can see our data. Sheets:
+  Areas (one row per clickable area: status, zone type, typology, area,
+  price…), Columns, Options (filter values + colours), Scenes. It is the
+  website project's `import-excel` format; nothing in this repo reads it.
+
 ## 2026-11-19 — Publish the "New project" map; hosted editor opens with it
 
 - **Data:** `data/project.json` is now the "New project" map (12 scenes,
